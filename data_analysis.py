@@ -45,7 +45,8 @@ def analyze_crops(df: pd.DataFrame, include_negatives: bool = True):
         print(f"\nCrop: {crop}")
         for part, n_val, sc_val, st_val in zip(parts, n_values_counts, sc_values_counts, st_values_counts):
             no_value_count = df[(df[IDComponents.crop.value] == crop) & (df[IDComponents.part.value] == part) &
-                                df[[ColumnName.n_value.value, ColumnName.sc_value.value, ColumnName.st_value.value]].isna().all(axis=1)].shape[0]
+                                df[[ColumnName.n_value.value, ColumnName.sc_value.value,
+                                    ColumnName.st_value.value]].isna().all(axis=1)].shape[0]
             if include_negatives:
                 negative_counts = df[(df[IDComponents.crop.value] == crop) & (df[IDComponents.part.value] == part)][
                     [ColumnName.n_value.value, ColumnName.sc_value.value, ColumnName.st_value.value]].lt(0).sum()
@@ -74,22 +75,12 @@ def remove_rows_with_negatives(df: pd.DataFrame) -> pd.DataFrame:
     return df[(df[columns_to_check] >= 0).all(axis=1)]
 
 
-def main(df_leaf_samples: pd.DataFrame):
-    # Perform the crop analysis with all leaf rows
-    print("Analysis for all leaf rows:")
-    analyze_crops(df_leaf_samples, include_negatives=True)
-
-    # # Perform the crop analysis for leaf rows without nulls
-    # df_leaf_samples_without_nulls = remove_rows_with_nulls(df_leaf_samples)
-    # print("\nAnalysis for leaf rows without nulls:")
-    # analyze_crops(df_leaf_samples_without_nulls, include_negatives=True)
-    #
-    # # Perform the crop analysis for leaf rows without nulls and negative values
-    # df_leaf_samples_without_negatives = remove_rows_with_negatives(df_leaf_samples_without_nulls)
-    # print("\nAnalysis for leaf rows without nulls and negative values:")
-    # analyze_crops(df_leaf_samples_without_negatives, include_negatives=False)
+def main():
+    print("Analysis for all relevant crops:")
+    df = pd.read_csv('data_files/extended_df_with_aviads_first_nulls_fill.csv')
+    analyze_crops(df, include_negatives=True)
+    print("\nAnalysis is done for all crops.")
 
 
 if __name__ == "__main__":
-    df = pd.read_csv('data_files/extended_df_with_aviads_first_nulls_fill.csv')
-    main(df)
+    main()

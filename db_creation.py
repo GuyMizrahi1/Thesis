@@ -140,7 +140,7 @@ def remove_rows_with_negatives(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def read_data_from_dbs(read_from_dbs) -> pd.DataFrame:
-    parquet_file_path = 'merged_data.parquet'
+    parquet_file_path = 'data_files/merged_data.parquet'
     if read_from_dbs:
         # Read and organize data from the first database
         result_db_path = 'extracted_dbs_files/DBS/RSL.db'
@@ -253,6 +253,7 @@ def main(read_from_dbs: bool = True):
     extended_df.to_csv(csv_file_path, index=False)
 
     # filled missing values based on Or's model
+    # todo - Update this file base on the new file that Aviad will provide
     null_filler_df = pd.read_csv('data_files/Results _merged_leaf_samples_data.csv')
 
     # Iterate over the columns to be updated
@@ -266,21 +267,6 @@ def main(read_from_dbs: bool = True):
         )
 
     extended_df.to_csv('data_files/extended_df_with_aviads_first_nulls_fill.csv', index=False)
-
-    #
-    # # Read the merged_data.parquet file into a DataFrame
-    # parquet_file_path = 'merged_data_with_alm_and_avo.parquet'
-    # merged_df = pd.read_parquet(parquet_file_path)
-    #
-    # # Remove rows with null values
-    # merged_df_without_nulls = remove_rows_with_nulls(merged_df)
-    #
-    # # Remove rows with negative values
-    # merged_df_with_positive_values = remove_rows_with_negatives(merged_df)
-    #
-    # print(f"Number of rows in merged_df: {len(merged_df)}")
-    # print(f"Number of rows in merged_df_without_nulls: {len(merged_df_without_nulls)}")
-    # print(f"Number of rows in merged_df_with_positive_values: {len(merged_df_with_positive_values)}")
 
 
 if __name__ == "__main__":
