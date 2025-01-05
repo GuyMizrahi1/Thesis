@@ -77,7 +77,7 @@ def remove_rows_with_negatives(df: pd.DataFrame) -> pd.DataFrame:
 
 def main():
     print("Analysis for all relevant crops:")
-    df = pd.read_csv('data_files/extended_df_with_aviads_first_nulls_fill.csv')
+    df = pd.read_csv('data_files/extended_df.csv')
     analyze_crops(df, include_negatives=True)
     print("\nAnalysis is done for all crops.")
 

@@ -143,13 +143,13 @@ def read_data_from_dbs(read_from_dbs) -> pd.DataFrame:
     parquet_file_path = 'data_files/merged_data.parquet'
     if read_from_dbs:
         # Read and organize data from the first database
-        result_db_path = 'extracted_dbs_files/DBS/RSL.db'
+        result_db_path = 'DBS/RSL.db'
         ftnir_table_name = 'FTNIR'
         result_df = read_table(result_db_path, ftnir_table_name)
         organized_result_df = organize_result_data(result_df)
 
         # Read and organize data from the second database
-        scan_db_path = 'extracted_dbs_files/DBS/SCN.db'
+        scan_db_path = 'DBS/SCN.db'
         ftnir_short_table_name = 'FTNIR_SHORT'
         scan_df = read_table(scan_db_path, ftnir_short_table_name)
         organized_scan_df = organize_scan_data(scan_df)
@@ -248,13 +248,10 @@ def main(read_from_dbs: bool = True):
     # Add columns that inferred from the ID column
     extended_df = add_columns_from_id(leaf_samples_df)
 
-    # Save the merged DataFrame as a CSV file
-    csv_file_path = 'data_files/extended_df.csv'
-    extended_df.to_csv(csv_file_path, index=False)
-
-    # filled missing values based on Or's model
-    # todo - Update this file base on the new file that Aviad will provide
-    null_filler_df = pd.read_csv('data_files/Results _merged_leaf_samples_data.csv')
+    # filled missing values based on Or & Aviad's application
+    first_null_filler_df = pd.read_csv('data_files/first_filler.csv')
+    second_null_filler_df = pd.read_csv('data_files/second_filler.csv')
+    null_filler_df = pd.concat([first_null_filler_df, second_null_filler_df], ignore_index=True)
 
     # Iterate over the columns to be updated
     for col, filler_col in zip(['N_Value', 'SC_Value', 'ST_Value'], ['N', 'SC', 'ST']):
@@ -266,7 +263,18 @@ def main(read_from_dbs: bool = True):
             axis=1
         )
 
-    extended_df.to_csv('data_files/extended_df_with_aviads_first_nulls_fill.csv', index=False)
+    extended_df.to_csv('data_files/extended_df.csv', index=False)
+    # Columns to check for None values
+    columns_to_check = ['N_Value', 'SC_Value', 'ST_Value']
+
+    # DataFrame with rows that have at least one None value in the specified columns
+    df_with_nones = extended_df[extended_df[columns_to_check].isna().any(axis=1)]
+    df_with_nones.to_csv('data_files/df_with_nones.csv', index=False)
+    # DataFrame with rows that have no None values in the specified columns
+    df_without_nones = extended_df[extended_df[columns_to_check].notna().all(axis=1)]
+
+    # Sanity check to ensure there are no None values in the second DataFrame
+    assert df_without_nones[columns_to_check].isna().sum().sum() == 0, "There are None values in df_without_nones"
 
 
 if __name__ == "__main__":
