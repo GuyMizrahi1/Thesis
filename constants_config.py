@@ -9,10 +9,11 @@ class ColumnName(str, Enum):
 
 
 class IDComponents(str, Enum):
-    crop = 'crop'
-    part = 'part'
-    location = 'location'
-    date = 'date'
+    crop = 'Crop'
+    tissue = 'Tissue'
+    location = 'Location'
+    date = 'Date'
+    sample = 'Sample'
 
 
 class Crop(str, Enum):
