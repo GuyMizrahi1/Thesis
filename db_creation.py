@@ -2,7 +2,8 @@ import re
 import os
 import sqlite3
 import pandas as pd
-from constants_config import ColumnName, CropTissue, Crop, TARGET_VARIABLES, NON_FEATURE_COLUMNS, ID_MAPPING
+from constants_config import ColumnName, CropTissue, Crop, TARGET_VARIABLES, NON_FEATURE_COLUMNS, ID_MAPPING, \
+    IDComponents
 from data_analysis import filter_leaf_parts
 
 
@@ -232,7 +233,22 @@ def add_columns_from_id(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def main(read_from_dbs: bool = True):
+def get_row_with_most_values(group: pd.DataFrame, value_columns: list) -> pd.Series:
+    # Count non-null values in the specified columns
+    non_null_counts = group[value_columns].notna().sum(axis=1)
+    # Get the index of the row with the maximum count of non-null values
+    max_index = non_null_counts.idxmax()
+    return group.loc[max_index]
+
+
+def remove_duplicates_with_most_values(df: pd.DataFrame, id_column: str, value_columns: list) -> pd.DataFrame:
+    # Group by the ID column and apply the function to each group
+    deduplicated_df = df.groupby(id_column).apply(
+        lambda group: get_row_with_most_values(group, value_columns)).reset_index(drop=True)
+    return deduplicated_df
+
+
+def main(read_from_dbs: bool = False):
     # Read data from the databases or from the parquet file
     based_on_db_df = read_data_from_dbs(read_from_dbs)
 
@@ -251,7 +267,9 @@ def main(read_from_dbs: bool = True):
     # filled missing values based on Or & Aviad's application
     first_null_filler_df = pd.read_csv('data_files/first_filler.csv')
     second_null_filler_df = pd.read_csv('data_files/second_filler.csv')
-    null_filler_df = pd.concat([first_null_filler_df, second_null_filler_df], ignore_index=True)
+    vine_null_filler_df = pd.read_csv('data_files/vine_filler.csv')
+    null_filler_df = pd.concat([first_null_filler_df, second_null_filler_df, vine_null_filler_df], ignore_index=True)
+    null_filler_df = remove_duplicates_with_most_values(null_filler_df, 'ID', ['N', 'SC', 'ST'])
 
     # Iterate over the columns to be updated
     for col, filler_col in zip(['N_Value', 'SC_Value', 'ST_Value'], ['N', 'SC', 'ST']):
@@ -263,18 +281,23 @@ def main(read_from_dbs: bool = True):
             axis=1
         )
 
+    extended_df.drop(columns=['crop', 'part'], inplace=True)
     extended_df.to_csv('data_files/extended_df.csv', index=False)
     # Columns to check for None values
-    columns_to_check = ['N_Value', 'SC_Value', 'ST_Value']
+    columns_to_check = [ColumnName.n_value.value, ColumnName.sc_value.value, ColumnName.st_value.value]
 
     # DataFrame with rows that have at least one None value in the specified columns
     df_with_nones = extended_df[extended_df[columns_to_check].isna().any(axis=1)]
-    df_with_nones.to_csv('data_files/df_with_nones.csv', index=False)
+    # Keep the relevant rows - Avocado crop
+    df_with_nones = df_with_nones[df_with_nones['Crop'] == Crop.avocado.value]
+    df_with_nones.to_csv('data_files/avocado_df_with_nones_kabri_and_gilat.csv', index=False)
     # DataFrame with rows that have no None values in the specified columns
     df_without_nones = extended_df[extended_df[columns_to_check].notna().all(axis=1)]
 
     # Sanity check to ensure there are no None values in the second DataFrame
     assert df_without_nones[columns_to_check].isna().sum().sum() == 0, "There are None values in df_without_nones"
+    print("Number of rows with at least one None value in the specified columns:", df_with_nones.shape[0])
+    print("Number of rows with no None values in the specified columns:", df_without_nones.shape[0])
 
 
 if __name__ == "__main__":
