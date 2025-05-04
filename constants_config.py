@@ -6,6 +6,8 @@ class ColumnName(str, Enum):
     sc_value = 'SC_Value'
     st_value = 'ST_Value'
     id = 'ID'
+    crop = 'Crop'
+    tissue = 'Tissue'
 
 
 class IDComponents(str, Enum):

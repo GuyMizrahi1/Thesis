@@ -2,8 +2,7 @@ import re
 import os
 import sqlite3
 import pandas as pd
-from constants_config import ColumnName, CropTissue, Crop, TARGET_VARIABLES, NON_FEATURE_COLUMNS, ID_MAPPING, \
-    IDComponents
+from constants_config import ColumnName, CropTissue, Crop, TARGET_VARIABLES, NON_FEATURE_COLUMNS, ID_MAPPING
 from data_analysis import filter_leaf_parts
 
 
@@ -248,7 +247,7 @@ def remove_duplicates_with_most_values(df: pd.DataFrame, id_column: str, value_c
     return deduplicated_df
 
 
-def main(read_from_dbs: bool = False):
+def main(read_from_dbs: bool = True, separate_filler_to_different_columns = False) -> None:
     # Read data from the databases or from the parquet file
     based_on_db_df = read_data_from_dbs(read_from_dbs)
 
@@ -271,18 +270,44 @@ def main(read_from_dbs: bool = False):
     null_filler_df = pd.concat([first_null_filler_df, second_null_filler_df, vine_null_filler_df], ignore_index=True)
     null_filler_df = remove_duplicates_with_most_values(null_filler_df, 'ID', ['N', 'SC', 'ST'])
 
-    # Iterate over the columns to be updated
-    for col, filler_col in zip(['N_Value', 'SC_Value', 'ST_Value'], ['N', 'SC', 'ST']):
-        # Update the null values in extended_df with values from null_filler_df based on matching 'ID'
-        extended_df[col] = extended_df.apply(
-            lambda row: null_filler_df.loc[null_filler_df['ID'] == row['ID'], filler_col].values[0]
-            if pd.isna(row[col]) and not null_filler_df.loc[null_filler_df['ID'] == row['ID'], filler_col].isna().empty
-            else row[col],
-            axis=1
-        )
+    if separate_filler_to_different_columns:
+        # Mapping from base values in extended_df to model predictions from null_filler_df
+        value_to_prediction = {'N_Value': 'N_ESTIMATED', 'SC_Value': 'SC_ESTIMATED', 'ST_Value': 'ST_ESTIMATED'}
 
-    extended_df.drop(columns=['crop', 'part'], inplace=True)
-    extended_df.to_csv('data_files/extended_df.csv', index=False)
+        # Source columns in null_filler_df
+        source_columns = {'N_Value': 'N', 'SC_Value': 'SC', 'ST_Value': 'ST'}
+
+        # Start inserting at column index 4
+        insert_pos = 4
+
+        for original_col, new_col in value_to_prediction.items():
+            source_col = source_columns[original_col]
+            new_series = extended_df.apply(
+                lambda row: null_filler_df.loc[null_filler_df['ID'] == row['ID'], source_col].values[0]
+                if pd.isna(row[original_col]) and not null_filler_df.loc[
+                    null_filler_df['ID'] == row['ID'], source_col].isna().all()
+                # else row[original_col],
+                else None,
+                axis=1
+            )
+            extended_df.insert(loc=insert_pos, column=new_col, value=new_series)
+            insert_pos += 1
+
+        extended_df.drop(columns=['crop', 'part'], inplace=True)
+        extended_df.to_csv('data_files/extended_df_with_predicted_columns.csv', index=False)
+    else:
+        # Iterate over the columns to be updated
+        for col, filler_col in zip(['N_Value', 'SC_Value', 'ST_Value'], ['N', 'SC', 'ST']):
+            # Update the null values in extended_df with values from null_filler_df based on matching 'ID'
+            extended_df[col] = extended_df.apply(
+                lambda row: null_filler_df.loc[null_filler_df['ID'] == row['ID'], filler_col].values[0]
+                if pd.isna(row[col]) and not null_filler_df.loc[null_filler_df['ID'] == row['ID'], filler_col].isna().empty
+                else row[col],
+                axis=1
+            )
+        extended_df.drop(columns=['crop', 'part'], inplace=True)
+        extended_df.to_csv('data_files/extended_df.csv', index=False)
+
     # Columns to check for None values
     columns_to_check = [ColumnName.n_value.value, ColumnName.sc_value.value, ColumnName.st_value.value]
 
