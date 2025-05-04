@@ -255,41 +255,23 @@ def add_non_timed_sample_column(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def insert_or_update_column(df: pd.DataFrame, column_name: str, column_data: pd.Series, position: int) -> pd.DataFrame:
-    if column_name in df.columns:
-        df = df.drop(columns=[column_name])
-        df.insert(position, column_name, column_data)
-    else:
-        df.insert(position, column_name, column_data)
-    return df
+def get_row_with_most_values(group: pd.DataFrame, value_columns: list) -> pd.Series:
+    # Count non-null values in the specified columns
+    non_null_counts = group[value_columns].notna().sum(axis=1)
+    # Get the index of the row with the maximum count of non-null values
+    max_index = non_null_counts.idxmax()
+    return group.loc[max_index]
 
 
-def add_columns_from_id(df: pd.DataFrame) -> pd.DataFrame:
-    # Extract components from the ID column
-    crop_column = df[ColumnName.id.value].str[:3]
-    location_column = df[ColumnName.id.value].str[3:6]
-    tissue_column = df[ColumnName.id.value].str[6:9].str.lower()
-    date_column = df[ColumnName.id.value].str[9:17]
-    sample_column = df[ColumnName.id.value].str[17:]
-
-    # Insert or update columns starting from the 4th position
-    df = insert_or_update_column(df, IDComponents.crop.value, crop_column, 4)
-    df = insert_or_update_column(df, IDComponents.location.value, location_column, 5)
-    df = insert_or_update_column(df, IDComponents.tissue.value, tissue_column, 6)
-    df = insert_or_update_column(df, IDComponents.date.value, date_column, 7)
-    df = insert_or_update_column(df, IDComponents.sample.value, sample_column, 8)
-
-    df = extract_id_components(df)
-    na_location_df = process_na_location_rows(df)
-    non_na_location_df = process_non_na_location_rows(df)
-    df = pd.concat([na_location_df, non_na_location_df]).sort_index()
-    df = map_id_components(df)
-    df = handle_special_cases(df)
-    df = add_non_timed_sample_column(df)
-    return df
+def remove_duplicates_with_most_values(df: pd.DataFrame, id_column: str, value_columns: list) -> pd.DataFrame:
+    # Group by the ID column and apply the function to each group
+    deduplicated_df = df.groupby(id_column).apply(
+        lambda group: get_row_with_most_values(group, value_columns)).reset_index(drop=True)
+    return deduplicated_df
 
 
-def main(read_from_dbs: bool = False):
+def main(read_from_dbs: bool = True, separate_filler_to_different_columns = False) -> None:
+
     # Read data from the databases or from the parquet file
     based_on_db_df = read_data_from_dbs(read_from_dbs)
 
@@ -306,45 +288,66 @@ def main(read_from_dbs: bool = False):
     extended_df = add_columns_from_id(leaf_samples_df)
 
     # filled missing values based on Or & Aviad's application
-    first_predicted_df = pd.read_csv('data_files/first_filler.csv')
-    second_predicted_df = pd.read_csv('data_files/second_filler.csv')
-    predicted_df = pd.concat([first_predicted_df, second_predicted_df], ignore_index=True)
-    # Keep only the specified columns
-    predicted_df = predicted_df[['ID', 'N', 'SC', 'ST']]
+    first_null_filler_df = pd.read_csv('data_files/first_filler.csv')
+    second_null_filler_df = pd.read_csv('data_files/second_filler.csv')
+    vine_null_filler_df = pd.read_csv('data_files/vine_filler.csv')
+    null_filler_df = pd.concat([first_null_filler_df, second_null_filler_df, vine_null_filler_df], ignore_index=True)
+    null_filler_df = remove_duplicates_with_most_values(null_filler_df, 'ID', ['N', 'SC', 'ST'])
 
-    # Iterate over the columns to be updated
-    for col, filler_col, predicted_col, position in zip(
-            [ColumnName.n_value.value, ColumnName.sc_value.value, ColumnName.st_value.value],
-            ['N', 'SC', 'ST'],
-            ['predicted_N_Value', 'predicted_SC_Value', 'predicted_ST_Value'],
-            [4, 5, 6]):
-        # Create new columns for predicted values
-        extended_df[predicted_col] = extended_df.apply(
-            lambda row: predicted_df.loc[predicted_df['ID'] == row['ID'], filler_col].values[0]
-            if pd.isna(row[col]) and not predicted_df.loc[predicted_df['ID'] == row['ID'], filler_col].isna().empty
-            else None,
-            axis=1
-        )
-        # Insert the new column at the specified position
-        extended_df.insert(position, predicted_col, extended_df.pop(predicted_col))
+    if separate_filler_to_different_columns:
+        # Mapping from base values in extended_df to model predictions from null_filler_df
+        value_to_prediction = {'N_Value': 'N_ESTIMATED', 'SC_Value': 'SC_ESTIMATED', 'ST_Value': 'ST_ESTIMATED'}
+
+        # Source columns in null_filler_df
+        source_columns = {'N_Value': 'N', 'SC_Value': 'SC', 'ST_Value': 'ST'}
+
+        # Start inserting at column index 4
+        insert_pos = 4
+
+        for original_col, new_col in value_to_prediction.items():
+            source_col = source_columns[original_col]
+            new_series = extended_df.apply(
+                lambda row: null_filler_df.loc[null_filler_df['ID'] == row['ID'], source_col].values[0]
+                if pd.isna(row[original_col]) and not null_filler_df.loc[
+                    null_filler_df['ID'] == row['ID'], source_col].isna().all()
+                # else row[original_col],
+                else None,
+                axis=1
+            )
+            extended_df.insert(loc=insert_pos, column=new_col, value=new_series)
+            insert_pos += 1
+
+        extended_df.drop(columns=['crop', 'part'], inplace=True)
+        extended_df.to_csv('data_files/extended_df_with_predicted_columns.csv', index=False)
+    else:
+        # Iterate over the columns to be updated
+        for col, filler_col in zip(['N_Value', 'SC_Value', 'ST_Value'], ['N', 'SC', 'ST']):
+            # Update the null values in extended_df with values from null_filler_df based on matching 'ID'
+            extended_df[col] = extended_df.apply(
+                lambda row: null_filler_df.loc[null_filler_df['ID'] == row['ID'], filler_col].values[0]
+                if pd.isna(row[col]) and not null_filler_df.loc[null_filler_df['ID'] == row['ID'], filler_col].isna().empty
+                else row[col],
+                axis=1
+            )
+        extended_df.drop(columns=['crop', 'part'], inplace=True)
+        extended_df.to_csv('data_files/extended_df.csv', index=False)
 
     # Columns to check for None values
-    columns_to_check = ['N_Value', 'SC_Value', 'ST_Value', 'predicted_N_Value', 'predicted_SC_Value',
-                        'predicted_ST_Value']
-    # Drop rows where Location value equals 'BH' or 'bar'
-    extended_df = extended_df[~extended_df[IDComponents.location.value].isin(['BH', 'bar'])]
-    # Remove rows that have only None values in the specified columns - the experimental rows
-    filtered_rows = extended_df[extended_df[columns_to_check].isna().all(axis=1)]  # Just for checking
-    extended_df = extended_df.dropna(subset=columns_to_check, how='all')
-    # DataFrame with rows that have more than 3 None values in the specified columns
-    df_with_nones = extended_df[extended_df[columns_to_check].isna().sum(axis=1) > 3]
+    columns_to_check = [ColumnName.n_value.value, ColumnName.sc_value.value, ColumnName.st_value.value]
 
-    df_with_nones.to_csv('data_files/df_with_nones.csv', index=False)
+    # DataFrame with rows that have at least one None value in the specified columns
+    df_with_nones = extended_df[extended_df[columns_to_check].isna().any(axis=1)]
+    # Keep the relevant rows - Avocado crop
+    df_with_nones = df_with_nones[df_with_nones['Crop'] == Crop.avocado.value]
+    df_with_nones.to_csv('data_files/avocado_df_with_nones_kabri_and_gilat.csv', index=False)
+
     # DataFrame with rows that have no None values in the specified columns
     df_without_nones = extended_df[extended_df[columns_to_check].notna().all(axis=1)]
 
     # Sanity check to ensure there are no None values in the second DataFrame
     assert df_without_nones[columns_to_check].isna().sum().sum() == 0, "There are None values in df_without_nones"
+    print("Number of rows with at least one None value in the specified columns:", df_with_nones.shape[0])
+    print("Number of rows with no None values in the specified columns:", df_without_nones.shape[0])
 
     extended_df.to_csv('data_files/extended_df.csv', index=False)
 
