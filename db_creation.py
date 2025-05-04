@@ -2,8 +2,8 @@ import re
 import os
 import sqlite3
 import pandas as pd
-from constants_config import ColumnName, CropTissue, Crop, TARGET_VARIABLES, NON_FEATURE_COLUMNS, ID_MAPPING
-from data_analysis import filter_leaf_parts
+from constants_config import (ColumnName, CropTissue, Crop, TARGET_VARIABLES, NON_FEATURE_COLUMNS, ID_MAPPING,
+                              IDComponents)
 
 
 def organize_result_data(df: pd.DataFrame) -> pd.DataFrame:
@@ -184,51 +184,74 @@ def filter_crops(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def add_columns_from_id(df: pd.DataFrame) -> pd.DataFrame:
-    # Extract components from the ID column and insert them at the desired positions
-    temp_df = df.copy()
-    df.insert(4, 'Crop', df[ColumnName.id.value].str[:3])
-    df.insert(5, 'Location', df[ColumnName.id.value].str[3:6])
+def filter_leaf_parts(df: pd.DataFrame) -> pd.DataFrame:
+    # Extract crop and part from the ID column and convert to lowercase
+    df[IDComponents.crop.value] = df[ColumnName.id.value].str[:3].str.lower()
+    df[IDComponents.tissue.value] = df[ColumnName.id.value].str[6:9].str.lower()
 
-    # Separate rows with 'NA' in 'Location' and process them
-    na_location_df = df[df['Location'].str.contains(r'^(NAl|UNl|BH|BHlֿ)', flags=re.IGNORECASE)]
-    na_location_df['Location'] = na_location_df[ColumnName.id.value].str[3:5]
-    na_location_df.insert(6, 'Tissue', na_location_df[ColumnName.id.value].str[5:8])
-    na_location_df.insert(7, 'Date', na_location_df[ColumnName.id.value].str[8:16])
-    na_location_df.insert(8, 'Sample', na_location_df[ColumnName.id.value].str[14:])
+    # Update incorrect classifier 'ea2' to 'lea'
+    df.loc[df[IDComponents.tissue.value] == 'ea2', IDComponents.tissue.value] = CropTissue.leaf_short.value
 
-    # Process rows without 'NA' in 'Location'
-    non_na_location_df = df[~df['Location'].str.contains(r'^(NAl|UNl|BH|BHlֿ)', flags=re.IGNORECASE)]
-    non_na_location_df.insert(6, 'Tissue', non_na_location_df[ColumnName.id.value].str[6:9])
-    non_na_location_df.insert(7, 'Date', non_na_location_df[ColumnName.id.value].str[9:17])
-    non_na_location_df.insert(8, 'Sample', non_na_location_df[ColumnName.id.value].str[17:])
+    # Filter the DataFrame to include only rows representing leaf samples
+    df_leaf_samples = df[df[IDComponents.tissue.value] == CropTissue.leaf_short.value]
+    return df_leaf_samples
 
-    # Combine the processed DataFrames
-    df = pd.concat([na_location_df, non_na_location_df]).sort_index()
 
-    # Map the extracted components using ID_MAPPING
-    df['Crop'] = df['Crop'].map(ID_MAPPING).fillna(df['Crop'])
-    df['Location'] = df['Location'].map(ID_MAPPING).fillna(df['Location'])
-    df['Tissue'] = df['Tissue'].map(ID_MAPPING).fillna(df['Tissue'])
+def extract_id_components(df: pd.DataFrame) -> pd.DataFrame:
+    df[IDComponents.crop.value] = df[ColumnName.id.value].str[:3]
+    df[IDComponents.location.value] = df[ColumnName.id.value].str[3:6]
+    return df
 
-    short_date_df = df[df['Date'].str.contains('_')]
-    short_date_df['Date'] = df['Date'].apply(lambda x: '20' + x[:6])
-    short_date_df['Sample'] = df['Date'].str[6:] + df['Sample']
+
+def process_na_location_rows(df: pd.DataFrame) -> pd.DataFrame:
+    na_location_df = df[df[IDComponents.location.value].str.contains(r'^(NAl|UNl|BH|BHlֿ)', flags=re.IGNORECASE)]
+    na_location_df[IDComponents.location.value] = na_location_df[ColumnName.id.value].str[3:5]
+    na_location_df[IDComponents.tissue.value] = na_location_df[ColumnName.id.value].str[5:8]
+    na_location_df[IDComponents.date.value] = na_location_df[ColumnName.id.value].str[8:16]
+    na_location_df[IDComponents.sample.value] = na_location_df[ColumnName.id.value].str[14:]
+    return na_location_df
+
+
+def process_non_na_location_rows(df: pd.DataFrame) -> pd.DataFrame:
+    non_na_location_df = df[~df[IDComponents.location.value].str.contains(r'^(NAl|UNl|BH|BHlֿ)', flags=re.IGNORECASE)]
+    non_na_location_df[IDComponents.tissue.value] = non_na_location_df[ColumnName.id.value].str[6:9]
+    non_na_location_df[IDComponents.date.value] = non_na_location_df[ColumnName.id.value].str[9:17]
+    non_na_location_df[IDComponents.sample.value] = non_na_location_df[ColumnName.id.value].str[17:]
+    return non_na_location_df
+
+
+def map_id_components(df: pd.DataFrame) -> pd.DataFrame:
+    df[IDComponents.crop.value] = df[IDComponents.crop.value].map(ID_MAPPING).fillna(df[IDComponents.crop.value])
+    df[IDComponents.location.value] = df[IDComponents.location.value].map(ID_MAPPING).fillna(
+        df[IDComponents.location.value])
+    df[IDComponents.tissue.value] = df[IDComponents.tissue.value].map(ID_MAPPING).fillna(df[IDComponents.tissue.value])
+    return df
+
+
+def handle_special_cases(df: pd.DataFrame) -> pd.DataFrame:
+    short_date_df = df[df[IDComponents.date.value].str.contains('_')]
+    short_date_df[IDComponents.date.value] = short_date_df[IDComponents.date.value].apply(lambda x: '20' + x[:6])
+    short_date_df[IDComponents.sample.value] = short_date_df[IDComponents.date.value].str[6:] + short_date_df[
+        IDComponents.sample.value]
     df.update(short_date_df)
 
-    long_tissue_df = df[df['Date'].str.contains('f')]
-    long_tissue_df['Tissue'] = long_tissue_df['Tissue'] + long_tissue_df['Date'].str[0]
-    long_tissue_df['Date'] = long_tissue_df['Date'].str[1:] + long_tissue_df['Sample'].str[0]
-    long_tissue_df['Sample'] = long_tissue_df['Sample'].str[1:]
+    long_tissue_df = df[df[IDComponents.date.value].str.contains('f')]
+    long_tissue_df[IDComponents.tissue.value] = long_tissue_df[IDComponents.tissue.value] + long_tissue_df[
+        IDComponents.date.value].str[0]
+    long_tissue_df[IDComponents.date.value] = long_tissue_df[IDComponents.date.value].str[1:] + long_tissue_df[
+        IDComponents.sample.value].str[0]
+    long_tissue_df[IDComponents.sample.value] = long_tissue_df[IDComponents.sample.value].str[1:]
     df.update(long_tissue_df)
 
-    df['Sample'] = df['Sample'].str.replace('_', '')
-    # remove nulls from sample
-    df = df[df['Sample'].notna() & (df['Sample'] != '')]
+    return df
 
-    # Create Non Timened Sample column and insert it at the desired position
-    df.insert(9, 'Non_Timed_Sample', df['Crop'] + df['Location'] + df['Tissue'] + '_' + df['Sample'])
 
+def add_non_timed_sample_column(df: pd.DataFrame) -> pd.DataFrame:
+    df[IDComponents.sample.value] = df[IDComponents.sample.value].str.replace('_', '')
+    df = df[df[IDComponents.sample.value].notna() & (df[IDComponents.sample.value] != '')]
+    non_timed_sample_column = df[IDComponents.crop.value] + df[IDComponents.tissue.value] + df[
+        IDComponents.location.value] + '_' + df[IDComponents.sample.value]
+    df.insert(9, 'Non_Timed_Sample', non_timed_sample_column)
     return df
 
 
@@ -248,6 +271,7 @@ def remove_duplicates_with_most_values(df: pd.DataFrame, id_column: str, value_c
 
 
 def main(read_from_dbs: bool = True, separate_filler_to_different_columns = False) -> None:
+
     # Read data from the databases or from the parquet file
     based_on_db_df = read_data_from_dbs(read_from_dbs)
 
@@ -316,6 +340,7 @@ def main(read_from_dbs: bool = True, separate_filler_to_different_columns = Fals
     # Keep the relevant rows - Avocado crop
     df_with_nones = df_with_nones[df_with_nones['Crop'] == Crop.avocado.value]
     df_with_nones.to_csv('data_files/avocado_df_with_nones_kabri_and_gilat.csv', index=False)
+
     # DataFrame with rows that have no None values in the specified columns
     df_without_nones = extended_df[extended_df[columns_to_check].notna().all(axis=1)]
 
@@ -323,6 +348,8 @@ def main(read_from_dbs: bool = True, separate_filler_to_different_columns = Fals
     assert df_without_nones[columns_to_check].isna().sum().sum() == 0, "There are None values in df_without_nones"
     print("Number of rows with at least one None value in the specified columns:", df_with_nones.shape[0])
     print("Number of rows with no None values in the specified columns:", df_without_nones.shape[0])
+
+    extended_df.to_csv('data_files/extended_df.csv', index=False)
 
 
 if __name__ == "__main__":

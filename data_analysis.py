@@ -2,19 +2,6 @@ import pandas as pd
 from constants_config import ColumnName, CropTissue, IDComponents
 
 
-def filter_leaf_parts(df: pd.DataFrame) -> pd.DataFrame:
-    # Extract crop and part from the ID column and convert to lowercase
-    df[IDComponents.crop.value] = df[ColumnName.id.value].str[:3].str.lower()
-    df[IDComponents.part.value] = df[ColumnName.id.value].str[6:9].str.lower()
-
-    # Update incorrect classifier 'ea2' to 'lea'
-    df.loc[df[IDComponents.part.value] == 'ea2', IDComponents.part.value] = CropTissue.leaf_short.value
-
-    # Filter the DataFrame to include only rows representing leaf samples
-    df_leaf_samples = df[df[IDComponents.part.value] == CropTissue.leaf_short.value]
-    return df_leaf_samples
-
-
 def analyze_crops(df: pd.DataFrame, include_negatives: bool = True):
     # Print number of unique crops
     unique_crops = df[ColumnName.crop.value].unique()
