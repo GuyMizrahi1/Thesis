@@ -42,8 +42,10 @@ class Location(str, Enum):
     gilat = 'Gilat'
     kabri = 'Kabri'
 
-
-TARGET_VARIABLES = [ColumnName.n_value.value, ColumnName.sc_value.value, ColumnName.st_value.value]
+N_VALUE = ColumnName.n_value.value
+SC_VALUE = ColumnName.sc_value.value
+ST_VALUE = ColumnName.st_value.value
+TARGET_VARIABLES = [N_VALUE, SC_VALUE, ST_VALUE]
 NON_FEATURE_COLUMNS = [ColumnName.id.value] + TARGET_VARIABLES
 
 ID_MAPPING = {

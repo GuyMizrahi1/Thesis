@@ -90,7 +90,7 @@ def adjust_alm_df(alm_df: pd.DataFrame, merged_df: pd.DataFrame) -> pd.DataFrame
         original_id = row[ColumnName.id.value]
         technician = row['Technician']
         suffix = ''
-        if technician in ['Ofek Woldenberg', 'Yeroslav']:
+        if technician in ['Ofek Woldenberg', 'Yeroslav', 'Tarin Paz-kagan']:
             location_within_tree = row['Location within the tree']
             if pd.notna(location_within_tree) and len(location_within_tree) >= 3:
                 suffix = location_within_tree[:3]
@@ -269,8 +269,54 @@ def remove_duplicates_with_most_values(df: pd.DataFrame, id_column: str, value_c
         lambda group: get_row_with_most_values(group, value_columns)).reset_index(drop=True)
     return deduplicated_df
 
+def add_columns_from_id(df: pd.DataFrame) -> pd.DataFrame:
+    # Extract components from the ID column and insert them at the desired positions
+    temp_df = df.copy()
+    df.insert(4, 'Crop', df[ColumnName.id.value].str[:3])
+    df.insert(5, 'Location', df[ColumnName.id.value].str[3:6])
 
-def main(read_from_dbs: bool = True, separate_filler_to_different_columns = False) -> None:
+    # Separate rows with 'NA' in 'Location' and process them
+    na_location_df = df[df['Location'].str.contains(r'^(NAl|UNl|BH|BHlֿ)', flags=re.IGNORECASE)]
+    na_location_df['Location'] = na_location_df[ColumnName.id.value].str[3:5]
+    na_location_df.insert(6, 'Tissue', na_location_df[ColumnName.id.value].str[5:8])
+    na_location_df.insert(7, 'Date', na_location_df[ColumnName.id.value].str[8:16])
+    na_location_df.insert(8, 'Sample', na_location_df[ColumnName.id.value].str[14:])
+
+    # Process rows without 'NA' in 'Location'
+    non_na_location_df = df[~df['Location'].str.contains(r'^(NAl|UNl|BH|BHlֿ)', flags=re.IGNORECASE)]
+    non_na_location_df.insert(6, 'Tissue', non_na_location_df[ColumnName.id.value].str[6:9])
+    non_na_location_df.insert(7, 'Date', non_na_location_df[ColumnName.id.value].str[9:17])
+    non_na_location_df.insert(8, 'Sample', non_na_location_df[ColumnName.id.value].str[17:])
+
+    # Combine the processed DataFrames
+    df = pd.concat([na_location_df, non_na_location_df]).sort_index()
+
+    # Map the extracted components using ID_MAPPING
+    df['Crop'] = df['Crop'].map(ID_MAPPING).fillna(df['Crop'])
+    df['Location'] = df['Location'].map(ID_MAPPING).fillna(df['Location'])
+    df['Tissue'] = df['Tissue'].map(ID_MAPPING).fillna(df['Tissue'])
+
+    short_date_df = df[df['Date'].str.contains('_')]
+    short_date_df['Date'] = df['Date'].apply(lambda x: '20' + x[:6])
+    short_date_df['Sample'] = df['Date'].str[6:] + df['Sample']
+    df.update(short_date_df)
+
+    long_tissue_df = df[df['Date'].str.contains('f')]
+    long_tissue_df['Tissue'] = long_tissue_df['Tissue'] + long_tissue_df['Date'].str[0]
+    long_tissue_df['Date'] = long_tissue_df['Date'].str[1:] + long_tissue_df['Sample'].str[0]
+    long_tissue_df['Sample'] = long_tissue_df['Sample'].str[1:]
+    df.update(long_tissue_df)
+
+    df['Sample'] = df['Sample'].str.replace('_', '')
+    # remove nulls from sample
+    df = df[df['Sample'].notna() & (df['Sample'] != '')]
+
+    # Create Non Timened Sample column and insert it at the desired position
+    df.insert(9, 'Non_Timed_Sample', df['Crop'] + df['Location'] + df['Tissue'] + '_' + df['Sample'])
+
+    return df
+
+def main(read_from_dbs: bool = True, separate_filler_to_different_columns = True) -> None:
 
     # Read data from the databases or from the parquet file
     based_on_db_df = read_data_from_dbs(read_from_dbs)
@@ -282,10 +328,10 @@ def main(read_from_dbs: bool = True, separate_filler_to_different_columns = Fals
     filtered_crops_df = filter_crops(merged_with_avo_and_alm_df)
 
     # Preprocess the data to include only leaf samples
-    leaf_samples_df = filter_leaf_parts(filtered_crops_df)
+    extended_df = filter_leaf_parts(filtered_crops_df)
 
     # Add columns that inferred from the ID column
-    extended_df = add_columns_from_id(leaf_samples_df)
+    # extended_df = add_columns_from_id(leaf_samples_df)
 
     # filled missing values based on Or & Aviad's application
     first_null_filler_df = pd.read_csv('data_files/first_filler.csv')
@@ -353,4 +399,4 @@ def main(read_from_dbs: bool = True, separate_filler_to_different_columns = Fals
 
 
 if __name__ == "__main__":
-    main()
+    main(read_from_dbs=False)
