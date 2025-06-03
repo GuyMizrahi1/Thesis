@@ -5,10 +5,10 @@ from constants_config import ColumnName, CropTissue, IDComponents
 def analyze_crops(df: pd.DataFrame, include_negatives: bool = True):
     # Print number of unique crops
     unique_crops = df[ColumnName.crop.value].unique()
-    print(f"Number of different crops: {len(unique_crops)}")
+    print(f"\nNumber of different crops: {len(unique_crops)}")
     print("Total number of rows:", len(df))
 
-    # Prepare list to hold row-wise summary
+    # Prepare a list to hold a row-wise summary
     summary_data = []
 
     for crop in unique_crops:
@@ -42,7 +42,7 @@ def analyze_crops(df: pd.DataFrame, include_negatives: bool = True):
             'Rows with No Values': no_values
         })
 
-    # Convert to DataFrame for nice tabular display
+    # Convert to DataFrame for a nice tabular display
     summary_df = pd.DataFrame(summary_data)
     print("\nCrop Data Summary:\n")
     print(summary_df.to_string(index=False))
@@ -54,6 +54,19 @@ def main():
     df = pd.read_csv('data_files/extended_df.csv')
     analyze_crops(df, include_negatives=True)
     print("\nAnalysis is done for all crops.")
+    print('Remove rows without all three values...')
+    valid_df = df[
+        df[[ColumnName.n_value.value, ColumnName.sc_value.value, ColumnName.st_value.value]].notna().any(axis=1)]
+    valid_df.to_csv('data_files/valid_df.csv', index=False)
+    analyze_crops(valid_df, include_negatives=True)
+
+    # remove Negative values where
+    final_df = valid_df[(valid_df[ColumnName.n_value.value] >= 0) &
+                        ((valid_df[ColumnName.sc_value.value] >= 0) | (valid_df[ColumnName.sc_value.value].isna())) &
+                        ((valid_df[ColumnName.st_value.value] >= 0) | (valid_df[ColumnName.st_value.value].isna()))]
+    final_df.to_csv('data_files/final_df.csv', index=False)
+    analyze_crops(final_df, include_negatives=True)
+    print("Analysis is done for all crops.")
 
 
 if __name__ == "__main__":
