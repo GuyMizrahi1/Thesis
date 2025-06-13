@@ -28,9 +28,9 @@ class CropPart(str, Enum):
 
 # Align for model training
 current_crop = Crop.vine.value
-target_variables = [ColumnName.sc_value.value]
+target_variables = [ColumnName.st_value.value]
 data_folder_spec = f'{current_crop}_{target_variables[0]}'
-n_components = 13
+n_components = 15
 
 
 TARGET_VARIABLES = [ColumnName.n_value.value, ColumnName.sc_value.value, ColumnName.st_value.value]

@@ -7,8 +7,8 @@ import pandas as pd
 import xgboost as xgb
 from tqdm import tqdm
 from sklearn.model_selection import KFold
-from sklearn.exceptions import NotFittedError
-from sklearn.preprocessing import StandardScaler
+# from sklearn.exceptions import NotFittedError
+# from sklearn.preprocessing import StandardScaler
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 from spectral_based_prediction.constants_config import TARGET_VARIABLES, NON_FEATURE_COLUMNS, MEAN
@@ -16,7 +16,7 @@ from spectral_based_prediction.constants_config import TARGET_VARIABLES, NON_FEA
 
 class XGBoostGeneric:
     def __init__(self, model_name, target_variables, n_splits=2, save_dir='models/', save_figure_dir='figures/',
-                 is_multi_output=True):
+                 is_multi_output=True, y_scaler=None):
         """
         Initialize XGBoost model
 
@@ -49,8 +49,8 @@ class XGBoostGeneric:
         self.evaluated_test_rmses = {}
         self.targets_rmses_for_best_params = {}
         self.scalers = {}
-        self.X_scaler = StandardScaler()
-        self.y_scaler = StandardScaler()
+        # self.X_scaler = None
+        self.y_scaler = y_scaler
 
     def preprocess_data(self, dataset="train"):
         """Preprocess data differently for regular XGBoost and PLSR-based XGBoost"""
@@ -67,30 +67,30 @@ class XGBoostGeneric:
             X = self.test_data[feature_columns]
             y = self.test_data[self.target_variables]
 
-        # Only apply scaling for regular XGBoost (not PLSR)
+        # # Only apply scaling for regular XGBoost (not PLSR)
         # if not self.model_name.endswith('_plsr'):
-        #     if dataset == "train":
-        #         # Fit and transform on training data
-        #         X = self.X_scaler.fit_transform(X)
-        #         if self.y_scaler is not None:
-        #             y_reshaped = y.values.reshape(-1, 1) if not self.is_multi_output else y.values
-        #             y = self.y_scaler.fit_transform(y_reshaped)
-        #     else:
-        #         # Only transform validation/test data
-        #         X = self.X_scaler.transform(X)
-        #         if self.y_scaler is not None:
-        #             y_reshaped = y.values.reshape(-1, 1) if not self.is_multi_output else y.values
-        #             y = self.y_scaler.transform(y_reshaped)
-
-        # Fit scaler on training targets but do NOT scale them
-        if not self.model_name.endswith('_plsr') and dataset == "train":
-            if self.y_scaler is not None:
-                y_array = y.values.reshape(-1, 1) if not self.is_multi_output else y.values
-                self.y_scaler.fit(y_array)  # Fit only, no transform
-
-        # For single output, return y as a 1D array
-        if not self.is_multi_output:
-            y = y[self.target_variables[0]] if isinstance(y, pd.DataFrame) else y.ravel()
+        # #     if dataset == "train":
+        # #         # Fit and transform on training data
+        # #         X = self.X_scaler.fit_transform(X)
+        # #         if self.y_scaler is not None:
+        # #             y_reshaped = y.values.reshape(-1, 1) if not self.is_multi_output else y.values
+        # #             y = self.y_scaler.fit_transform(y_reshaped)
+        # #     else:
+        # #         # Only transform validation/test data
+        # #         X = self.X_scaler.transform(X)
+        # #         if self.y_scaler is not None:
+        # #             y_reshaped = y.values.reshape(-1, 1) if not self.is_multi_output else y.values
+        # #             y = self.y_scaler.transform(y_reshaped)
+        #
+        # # Fit scaler on training targets but do NOT scale them
+        # if not self.model_name.endswith('_plsr') and dataset == "train":
+        #     if self.y_scaler is not None:
+        #         y_array = y.values.reshape(-1, 1) if not self.is_multi_output else y.values
+        #         self.y_scaler.fit(y_array)  # Fit only, no transform
+        #
+        # # For single output, return y as a 1D array
+        # if not self.is_multi_output:
+        #     y = y[self.target_variables[0]] if isinstance(y, pd.DataFrame) else y.ravel()
 
         return X, y
 
@@ -152,7 +152,7 @@ class XGBoostGeneric:
         param_grid = {
             "learning_rate": [0.01, 0.1, 0.2],
             "max_depth": [3, 5, 7],
-            "n_estimators": [50, 100, 200],
+            "n_estimators": [20, 50, 100],
             "subsample": [0.6, 0.8, 1.0],
             "colsample_bytree": [0.6, 0.8, 1.0],
             "gamma": [0, 0.1, 0.2],
@@ -161,6 +161,19 @@ class XGBoostGeneric:
         keys, values = zip(*param_grid.items())
         configurations = [dict(zip(keys, v)) for v in itertools.product(*values)]
         return random.sample(configurations, 100)
+
+    def is_scaled(self, y):
+        if np.all(y > 0):
+            return False
+        else:
+            return True
+
+    def inverse_scale_if_needed(self, y):
+        if self.is_scaled(y):
+            y = np.array(y).reshape(-1, 1)
+            y = self.y_scaler.inverse_transform(y)
+            y = y.ravel()
+        return y
 
     def scale_y_values(self, y, y_pred):
         if not self.model_name.endswith('_plsr'):
@@ -204,14 +217,16 @@ class XGBoostGeneric:
         model.fit(X_train, y_train)
         y_pred = model.predict(X_val)
 
-        y_true_final, y_pred_final = self.scale_y_values(y_val, y_pred)
+        # y_true_final, y_pred_final = self.scale_y_values(y_val, y_pred)
+        y_val = self.inverse_scale_if_needed(y_val)
+        y_pred = self.inverse_scale_if_needed(y_pred)
 
         if self.is_multi_output:
-            multi_rmses = np.sqrt(mean_squared_error(y_true_final, y_pred_final, multioutput='raw_values'))
+            multi_rmses = np.sqrt(mean_squared_error(y_val, y_pred, multioutput='raw_values'))
             mean_rmses = np.mean(multi_rmses)
             return mean_rmses, multi_rmses.tolist()
         else:
-            rmse = np.sqrt(mean_squared_error(y_true_final, y_pred_final))
+            rmse = np.sqrt(mean_squared_error(y_val, y_pred))
             return rmse, [rmse]
 
     def find_best_configuration_based_rmse_score(self, X_train, y_train, X_val, y_val, model_name):
@@ -228,6 +243,7 @@ class XGBoostGeneric:
         else:
             best_targets_rmses = {self.target_variables[0]: None}
 
+        # # todo return this code!!!!!-------------------------------------------------------------
         # Hyperparameter tuning loop
         for params in tqdm(param_grid, desc="Hyperparameter tuning"):
             rmse, multi_targets_rmses = self.train_and_evaluate_by_rmse_per_configuration(params, X_train, y_train,
@@ -242,34 +258,39 @@ class XGBoostGeneric:
                     best_targets_rmses = {self.target_variables[0]: multi_targets_rmses[0]}
 
         self.best_params = best_params
+        # # todo return this code!!!!!-------------------------------------------------------------
+        # self.best_params = {'learning_rate': 0.2, 'max_depth': 7, 'n_estimators': 100, 'subsample': 0.8,
+        #                     'colsample_bytree': 0.8, 'gamma': 0, 'reg_lambda': 1}
+        # best_targets_rmses = {'N_Value': np.float64(0.24239717956065013)}
+        # minimal_rmse = np.float64(0.24239717956065013)
         best_targets_rmses[MEAN] = minimal_rmse
         self.targets_rmses_for_best_params = best_targets_rmses
         print(f"\nBest Configurations for {model_name} raised from Hyperparameter tuning:")
-        print(best_params)
+        print(self.best_params)
 
-        return best_targets_rmses, best_params, minimal_rmse
+        return self.targets_rmses_for_best_params, self.best_params, minimal_rmse
 
-    def k_fold_cross_validate_model(self, X_train, y_train, param_grid):
+    def k_fold_cross_validate_model(self, X_train, y_train, param_grid, y_scaler):
         kf = KFold(n_splits=self.n_splits, shuffle=True, random_state=42)
         self.train_rmses = {}
         self.val_rmses = {}
         self.scalers = {}
 
         is_multi_output = len(self.target_variables) > 1
+        # todo - I don't see why does we nee ro do it if I have y_scaler from the PLSR package
+        # # Fit scaler per target
+        # for i, target in enumerate(self.target_variables):
+        #     scaler = StandardScaler()
+        #     if isinstance(y_train, np.ndarray):
+        #         y_col = y_train[:, i].reshape(-1, 1)
+        #     elif isinstance(y_train, pd.Series):
+        #         y_col = y_train.values.reshape(-1, 1)
+        #     else:
+        #         y_col = y_train[target].values.reshape(-1, 1)
+        #     scaler.fit(y_col)
+        #     self.scalers[target] = scaler
 
-        # Fit scaler per target
-        for i, target in enumerate(self.target_variables):
-            scaler = StandardScaler()
-            if isinstance(y_train, np.ndarray):
-                y_col = y_train[:, i].reshape(-1, 1)
-            elif isinstance(y_train, pd.Series):
-                y_col = y_train.values.reshape(-1, 1)
-            else:
-                y_col = y_train[target].values.reshape(-1, 1)
-            scaler.fit(y_col)
-            self.scalers[target] = scaler
-
-        self.y_scaler = self.scalers[self.target_variables[0]]  # default scaler
+        # self.y_scaler = self.scalers[self.target_variables[0]]  # default scaler
 
         params = self.best_params if hasattr(self, "best_params") else param_grid
 
@@ -302,13 +323,13 @@ class XGBoostGeneric:
                         y_train_pred_i = estimator.predict(X_train_fold, iteration_range=(0, round_num))
                         y_val_pred_i = estimator.predict(X_val_fold, iteration_range=(0, round_num))
 
-                        y_train_scaled = self.scalers[target].transform(y_train_true.values.reshape(-1, 1))
-                        y_train_pred_scaled = self.scalers[target].transform(y_train_pred_i.reshape(-1, 1))
-                        y_val_scaled = self.scalers[target].transform(y_val_true.values.reshape(-1, 1))
-                        y_val_pred_scaled = self.scalers[target].transform(y_val_pred_i.reshape(-1, 1))
+                        # y_train_scaled = self.scalers[target].transform(y_train_true.values.reshape(-1, 1))
+                        # y_train_pred_scaled = self.scalers[target].transform(y_train_pred_i.reshape(-1, 1))
+                        # y_val_scaled = self.scalers[target].transform(y_val_true.values.reshape(-1, 1))
+                        # y_val_pred_scaled = self.scalers[target].transform(y_val_pred_i.reshape(-1, 1))
 
-                        rmse_train = mean_squared_error(y_train_scaled, y_train_pred_scaled, squared=False)
-                        rmse_val = mean_squared_error(y_val_scaled, y_val_pred_scaled, squared=False)
+                        rmse_train = mean_squared_error(y_train_true, y_train_pred_i, squared=False)
+                        rmse_val = mean_squared_error(y_val_true, y_val_pred_i, squared=False)
 
                         per_iter_train_rmse.append(rmse_train)
                         per_iter_val_rmse.append(rmse_val)
@@ -343,11 +364,11 @@ class XGBoostGeneric:
                     y_train_pred_i = model.predict(X_train_fold, iteration_range=(0, round_num))
                     y_val_pred_i = model.predict(X_val_fold, iteration_range=(0, round_num))
 
-                    y_train_true_scaled, y_train_pred_scaled = self.scale_y_values(y_train_fold, y_train_pred_i)
-                    y_val_true_scaled, y_val_pred_scaled = self.scale_y_values(y_val_fold, y_val_pred_i)
+                    # y_train_true_scaled, y_train_pred_scaled = self.scale_y_values(y_train_fold, y_train_pred_i)
+                    # y_val_true_scaled, y_val_pred_scaled = self.scale_y_values(y_val_fold, y_val_pred_i)
 
-                    rmse_train = mean_squared_error(y_train_true_scaled, y_train_pred_scaled) ** 2
-                    rmse_val = mean_squared_error(y_val_true_scaled, y_val_pred_scaled) ** 2
+                    rmse_train = np.sqrt(mean_squared_error(y_train_fold, y_train_pred_i))
+                    rmse_val = np.sqrt(mean_squared_error(y_val_fold, y_val_pred_i))
 
                     per_iter_train_rmse.append(rmse_train)
                     per_iter_val_rmse.append(rmse_val)
@@ -374,14 +395,16 @@ class XGBoostGeneric:
         # Get predictions
         y_pred = model.predict(X)
 
-        y_true_final, y_pred_final = self.scale_y_values(y, y_pred)
+        y = self.inverse_scale_if_needed(y)
+        y_pred = self.inverse_scale_if_needed(y_pred)
+        # y_true_final, y_pred_final = self.scale_y_values(y, y_pred)
 
         # Calculate metrics
-        rmse = np.sqrt(mean_squared_error(y_true_final, y_pred_final))
-        r2 = r2_score(y_true_final, y_pred_final)
+        rmse = np.sqrt(mean_squared_error(y, y_pred))
+        r2 = r2_score(y, y_pred)
 
         # Calculate adjusted R²
-        n = len(y_true_final)
+        n = len(y)
         p = X.shape[1]
         r2_adj = 1 - (1 - r2) * (n - 1) / (n - p - 1)
 
@@ -402,7 +425,7 @@ class XGBoostGeneric:
         print(f"R²: {r2:.4f}")
         print(f"Adjusted R²: {r2_adj:.4f}")
 
-        return y_pred_final
+        return y_pred
 
     def save_model_object(self, data_folder_spec):
         print("Saving the model object after evaluation...")
@@ -410,7 +433,7 @@ class XGBoostGeneric:
         os.makedirs(directory, exist_ok=True)
         joblib.dump(self, os.path.join(directory, 'model.pkl'))
 
-    def run(self, train_path, val_path, test_path, data_folder_spec):
+    def run(self, train_path, val_path, test_path, data_folder_spec, scaled=False):
         print(f"Running {self.model_name} XGBoost{'MultiOutput' if self.is_multi_output else ''}")
 
         self.load_data(train_path, val_path, test_path)
@@ -418,6 +441,21 @@ class XGBoostGeneric:
         X_val, y_val = self.preprocess_data(dataset="val")
         X_test, y_test = self.preprocess_data(dataset="test")
 
+        # todo - set as irrelevant today - I'll inverse at the end
+        # if self.model_name.endswith('_plsr'):
+        #     self.y_scaler.fit(y_train)
+        #     y_val = self.y_scaler.inverse_transform(y_val)
+        #     y_test = self.y_scaler.inverse_transform(y_test)
+
+        #     # Transform validation and test data using the fitted scaler
+        #     if not self.is_multi_output:
+        #         y_val = self.y_scaler.transform(
+        #             y_val.values.reshape(-1, 1) if isinstance(y_val, pd.Series) else y_val.reshape(-1, 1))
+        #         y_test = self.y_scaler.transform(
+        #             y_test.values.reshape(-1, 1) if isinstance(y_test, pd.Series) else y_test.reshape(-1, 1))
+        #     else:
+        #         y_val = self.y_scaler.transform(y_val)
+        #         y_test = self.y_scaler.transform(y_test)
         # # Fit the y_scaler on training data if not already fitted
         # if not self.model_name.endswith('_plsr'):
         #     if not self.is_multi_output:
@@ -446,7 +484,7 @@ class XGBoostGeneric:
         for key, value in best_rmses.items():
             print(f"{key}: {value}")
 
-        self.k_fold_cross_validate_model(X_train, y_train, best_params)
+        self.k_fold_cross_validate_model(X_train, y_train, best_params, self.y_scaler)
         self.evaluate_model(X_val, y_val, self.model, dataset_type='validation')
         self.save_model_object(data_folder_spec)
         self.evaluate_model(X_test, y_test, self.model, dataset_type='test')

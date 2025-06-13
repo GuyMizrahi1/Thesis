@@ -8,7 +8,7 @@ from PLSR_class import PLSRModel
 from spectral_based_prediction.baseline_for_training.Dataset import Dataset
 from spectral_based_prediction.baseline_for_training.Training_and_Tuning import CV10
 from spectral_based_prediction.baseline_for_training.Training_and_Tuning import hyperParameterTuning
-from spectral_based_prediction.constants_config import data_folder_spec, target_variables
+from spectral_based_prediction.constants_config import data_folder_spec, target_variables, n_components as n_components_by_elbow_method
 
 def create_json_file(rmses, path, filename):
     with open(os.path.join(path, filename), 'w') as f:
@@ -56,6 +56,10 @@ if __name__ == '__main__':
     dataset.X_test[dataset.X_test.columns] = X_scaler.transform(dataset.X_test.values)
     dataset.Y_test[dataset.Y_test.columns] = Y_scaler.transform(dataset.Y_test.values)
 
+    # Fix: Attach scalers to the dataset instance
+    dataset.X_scaler = X_scaler
+    dataset.Y_scaler = Y_scaler
+
     # Preparing Models
     # Define the parameter grid
     param_grid = {'n_components': [i for i in range(1, 51)]}
@@ -88,7 +92,8 @@ if __name__ == '__main__':
             best_n = sorted(model_rmses['Avg_RMSE'], key=lambda x: x[1])[0][0]['n_components']
         else:
             best_n = sorted(model_rmses[model_name], key=lambda x: x[1])[0][0]['n_components']
-        best_components[model_name] = best_n
+        best_components[model_name] = n_components_by_elbow_method
+        print(f'Best {model_name} PLSR Number of Components By Elbow Method:', n_components_by_elbow_method)
         print(f'Best {model_name} PLSR Number of Components:', best_n)
 
     # Training using CV10
@@ -124,6 +129,7 @@ if __name__ == '__main__':
         print("RMSECV:", model.evaluation_metrics["rmsecv"])
         print('best_n_components', getattr(model, "best_n_components", None))
         print("VIP Scores:", model.evaluation_metrics["variable_importance"])
+
         create_json_file(model.evaluation_metrics, path ,f'{model_name}_rmse_test.json')
 
         # save the model with an appropriate name

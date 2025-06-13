@@ -6,7 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
 from spectral_based_prediction.constants_config import COLOR_PALETTE_FOR_TARGET_VARIABLES, TARGET_VARIABLES_WITH_MEAN, \
-    NON_FEATURE_COLUMNS, TARGET_VARIABLES, COLOR_PALETTE_FOR_TWO_MODELS
+    NON_FEATURE_COLUMNS, TARGET_VARIABLES, COLOR_PALETTE_FOR_TWO_MODELS, ColumnName
 
 
 def ensure_data_paths_exist(data_folder_path, data_folder_spec: str, plsr_comp: str):
@@ -96,7 +96,7 @@ def get_X_y(data_path, dataset='train'):
     X = data[feature_columns]
 
     # Find the target column - it should be the only non-feature column
-    target_columns = [col for col in data.columns if col not in feature_columns]
+    target_columns = [col for col in NON_FEATURE_COLUMNS if col in data.columns and col != ColumnName.id.value]  # Exclude ID column explicitly
 
     # Convert target columns to numeric type
     y = data[target_columns].apply(pd.to_numeric, errors='coerce')
@@ -116,6 +116,10 @@ def save_test_scores(model1, model2, single_target, test_path1, test_path2, save
         model2.model_name: {}
     }
 
+    y_test1 = model1.inverse_scale_if_needed(y_test1)
+    y_pred1 = model1.inverse_scale_if_needed(y_pred1)
+    y_test2 = model2.inverse_scale_if_needed(y_test2)
+    y_pred2 = model2.inverse_scale_if_needed(y_pred2)
     # Ensure y_pred1 and y_pred2 are 2D arrays
     if len(y_pred1.shape) == 1:
         y_pred1 = y_pred1.reshape(-1, 1)
@@ -132,26 +136,26 @@ def save_test_scores(model1, model2, single_target, test_path1, test_path2, save
             print(f"Warning: Skipping target {var} as it's not available in the predictions")
             continue
 
-        # # Scale predictions for model1
-        y_pred1_scaled = model1.y_scaler.transform(y_pred1[:, i].reshape(-1, 1)).ravel()
-        y_true1_scaled = model1.y_scaler.transform(y_test1[var].values.reshape(-1, 1)).ravel()
+        # # # Scale predictions for model1
+        # y_pred1_scaled = model1.y_scaler.transform(y_pred1[:, i].reshape(-1, 1)).ravel()
+        # y_true1_scaled = model1.y_scaler.transform(y_test1[var].values.reshape(-1, 1)).ravel()
 
         # y_true1 = y_test1[var].values.reshape(-1, 1)
         # y_true1_scaled = model1.y_scaler.transform(y_true1).ravel()
         # # y_pred1 is already scaled from the model
         # y_pred1_i = y_pred1[:, i]
 
-        # For model2: using unscaled values
-        y_true2 = y_test2[var].values
-        y_pred2_i = y_pred2[:, i]
+        # # For model2: using unscaled values
+        # y_true2 = y_test2[var].values
+        # y_pred2_i = y_pred2[:, i]
 
         # Compute metrics using properly scaled values
-        rmse1 = np.sqrt(np.mean((y_true1_scaled - y_pred1_scaled) ** 2))
-        r2_1 = r2_score(y_true1_scaled, y_pred1_scaled)
+        rmse1 = np.sqrt(np.mean((y_test1 - y_pred1) ** 2))
+        r2_1 = r2_score(y_test1, y_pred1)
         r2_1 = r2_1 if r2_1 > 0 else abs(r2_1) / 10
-
-        rmse2 = np.sqrt(np.mean((y_true2 - y_pred2_i) ** 2))
-        r2_2 = r2_score(y_true2, y_pred2_i)
+        # PLSR based model
+        rmse2 = np.sqrt(np.mean((y_test2 - y_pred2) ** 2))
+        r2_2 = r2_score(y_test1, y_pred2)
 
         # Save to scores dict
         scores[model1.model_name][var] = {'rmse': rmse1, 'r2': r2_1}
@@ -169,6 +173,7 @@ def save_test_scores(model1, model2, single_target, test_path1, test_path2, save
     # Save scores to a file
     os.makedirs(save_dir, exist_ok=True)
     save_path = os.path.join(save_dir, 'test_scores.txt')
+    save_path = os.path.join(save_dir, 'test_scores.txt')
 
     with open(save_path, 'w') as f:
         f.write('Test scores for {}:\n\n'.format(model1.model_name))
@@ -183,16 +188,16 @@ def save_test_scores(model1, model2, single_target, test_path1, test_path2, save
             f.write('rmse: {:.4f}\n'.format(scores[model2.model_name][var]['rmse']))
             f.write('r2: {:.4f}\n\n'.format(scores[model2.model_name][var]['r2']))
 
-    # Print scores and create a description
-    print("\n=== Model Performance Comparison ===\n")
-
-    # Print scores in a formatted way
-    for model_name, model_scores in scores.items():
-        print(f"\nTest scores for {model_name}:")
-        for var in model_scores:
-            print(f"\n{var}:")
-            for metric, value in model_scores[var].items():
-                print(f"{metric}: {value:.4f}")
+    # # Print scores and create a description
+    # print("\n=== Model Performance Comparison ===\n")
+    #
+    # # Print scores in a formatted way
+    # for model_name, model_scores in scores.items():
+    #     print(f"\nTest scores for {model_name}:")
+    #     for var in model_scores:
+    #         print(f"\n{var}:")
+    #         for metric, value in model_scores[var].items():
+    #             print(f"{metric}: {value:.4f}")
 
     # # Only calculate and include mean if it's a multi-target model AND there's more than one target
     # if (not single_target) and len(scores[model1.model_name]) > 1:
@@ -354,19 +359,39 @@ def plot_residuals(model1, model2, target, directory1, directory2, save_dir):
 
     y_pred1 = model1.model.predict(X_test1)
     y_pred2 = model2.model.predict(X_test2)
+    # todo make sure it's not scaled again!!!!! I should remove it tonight!
 
-    y_test1_scaled, y_pred1_scaled = model1.scale_y_values(y_test1, y_pred1)
-    y_test2_scaled, y_pred2_scaled = model2.scale_y_values(y_test2, y_pred2)
+    y_test1 = model1.inverse_scale_if_needed(y_test1)
+    y_pred1 = model1.inverse_scale_if_needed(y_pred1)
+    y_test2 = model2.inverse_scale_if_needed(y_test2)
+    y_pred2 = model2.inverse_scale_if_needed(y_pred2)
 
-    if len(y_test1_scaled.shape) > 1:
+    # y_test1_scaled, y_pred1_scaled = model1.scale_y_values(y_test1, y_pred1)
+    # y_test2_scaled, y_pred2_scaled = model2.scale_y_values(y_test2, y_pred2)
+
+    # Convert DataFrames to NumPy arrays, if needed
+    y_test1 = y_test1.to_numpy() if isinstance(y_test1, pd.DataFrame) else y_test1
+    y_pred1 = y_pred1.to_numpy() if isinstance(y_pred1, pd.DataFrame) else y_pred1
+    y_test2 = y_test2.to_numpy() if isinstance(y_test2, pd.DataFrame) else y_test2
+    y_pred2 = y_pred2.to_numpy() if isinstance(y_pred2, pd.DataFrame) else y_pred2
+
+    # Ensure arrays are 2D for safe indexing
+    y_test1 = y_test1.reshape(-1, 1) if y_test1.ndim == 1 else y_test1
+    y_pred1 = y_pred1.reshape(-1, 1) if y_pred1.ndim == 1 else y_pred1
+    y_test2 = y_test2.reshape(-1, 1) if y_test2.ndim == 1 else y_test2
+    y_pred2 = y_pred2.reshape(-1, 1) if y_pred2.ndim == 1 else y_pred2
+
+    # Apply slicing only if arrays are 2D with more than one column
+    if y_test1.shape[1] > 1:
         target_index = model1.target_variables.index(target)
-        y_test1_scaled = y_test1_scaled[:, target_index]
-        y_pred1_scaled = y_pred1_scaled[:, target_index]
-        y_test2_scaled = y_test2_scaled[:, target_index]
-        y_pred2_scaled = y_pred2_scaled[:, target_index]
+        y_test1 = y_test1[:, target_index]
+        y_pred1 = y_pred1[:, target_index]
+        y_test2 = y_test2[:, target_index]
+        y_pred2 = y_pred2[:, target_index]
 
-    residuals1 = y_test1_scaled - y_pred1_scaled
-    residuals2 = y_test2_scaled - y_pred2_scaled
+    # Calculate residuals
+    residuals1 = y_test1 - y_pred1
+    residuals2 = y_test2 - y_pred2
 
     print(f"Residuals range - Model 1: [{np.nanmin(residuals1)}, {np.nanmax(residuals1)}]")
     print(f"Number of non-zero residuals: {np.count_nonzero(~np.isnan(residuals1))}")
@@ -376,10 +401,10 @@ def plot_residuals(model1, model2, target, directory1, directory2, save_dir):
     mask1 = ~np.isnan(residuals1)
     mask2 = ~np.isnan(residuals2)
 
-    plt.scatter(y_pred1_scaled[mask1], residuals1[mask1], alpha=0.5,
+    plt.scatter(y_pred1[mask1], residuals1[mask1], alpha=0.5,
                 label=f'{model1.model_name} Residuals',
                 color=COLOR_PALETTE_FOR_TWO_MODELS['model1'])
-    plt.scatter(y_pred2_scaled[mask2], residuals2[mask2], alpha=0.5,
+    plt.scatter(y_pred2[mask2], residuals2[mask2], alpha=0.5,
                 label=f'{model2.model_name} Residuals',
                 color=COLOR_PALETTE_FOR_TWO_MODELS['model2'])
 

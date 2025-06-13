@@ -3,6 +3,7 @@ import math
 import joblib
 import json
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from baseline_for_training.Dataset import Dataset
 from sklearn.ensemble import RandomForestRegressor
@@ -82,50 +83,21 @@ class RFModel(BaseModel):
         print(f"Test RMSE: {self.test_rmse}")
 
     def eval_plot(self):
-        # TODO - I'm not sure if this is needed anymore
-        # # --- Flatten RMSE and R² values ---
-        # flat_rmse = {}
-        # flat_r2 = {}
-        #
-        # for target, result in self.test_rmse.items():
-        #     if isinstance(result, dict):  # nested structure
-        #         for sub_key, metrics in result.items():
-        #             key = f"{target}_{sub_key}"
-        #             flat_rmse[key] = metrics["rmse"]
-        #             flat_r2[key] = metrics["r2"]
-        #     else:
-        #         flat_rmse[target] = result.get("rmse", None)
-        #         flat_r2[target] = result.get("r2", None)
-        #
-        # # --- Plot RMSE ---
-        # fig, ax = plt.subplots(figsize=(8, 5))
-        # bars = ax.bar(flat_rmse.keys(), flat_rmse.values(), color='skyblue')
-        # ax.set_xlabel('Target Variables', fontsize=12)
-        # ax.set_ylabel('RMSE', fontsize=12)
-        # ax.set_title('Test RMSE')
-        # plt.xticks(rotation=45)
-        # plt.tight_layout()
-        # fig.savefig(os.path.join(self.model_path, 'Test_RMSE_RF.png'), dpi=300)
-        # plt.close()
-        #
-        # # --- Plot R² ---
-        # fig, ax = plt.subplots(figsize=(8, 5))
-        # bars = ax.bar(flat_r2.keys(), flat_r2.values(), color='lightgreen')
-        # ax.set_xlabel('Target Variables', fontsize=12)
-        # ax.set_ylabel('R² Score', fontsize=12)
-        # ax.set_title('Test R² Score')
-        # plt.xticks(rotation=45)
-        # plt.tight_layout()
-        # fig.savefig(os.path.join(self.model_path, 'Test_R2_RF.png'), dpi=300)
-        # plt.close()
+        if isinstance(self.dataset.Y_test, pd.Series):  # Convert Series to DataFrame
+            self.dataset.Y_test = self.dataset.Y_test.to_frame()
 
         # Plot predicted vs actual values
-        y_hat = self.model.predict(self.dataset.X_test)
-        y_test = self.dataset.Y_test.to_numpy()
+        y_pred_scaled = self.model.predict(self.dataset.X_test)
+        if y_pred_scaled.ndim == 1:
+            y_pred_scaled = y_pred_scaled.reshape(-1, 1)
 
-        if not self.is_multi_output:
-            y_test = y_test.reshape(-1, 1)
-            y_hat = y_hat.reshape(-1, 1)
+        # Convert predicted values back to their original scale
+        y_hat = pd.DataFrame(
+            self.dataset.Y_scaler.inverse_transform(y_pred_scaled),
+            columns=self.dataset.Y_test.columns
+        )
+
+        y_test = self.dataset.Y_test_non_scaled
 
         n_targets = len(self.target_names)
         n_cols = min(2, n_targets)
@@ -141,7 +113,7 @@ class RFModel(BaseModel):
         for idx, target in enumerate(self.target_names):
             row = idx // n_cols
             col = idx % n_cols
-            axs[row, col].scatter(y_test[:, idx], y_hat[:, idx])
+            axs[row, col].scatter(y_test.iloc[:, idx].values, y_hat.iloc[:, idx].values)
             axs[row, col].set_title(target)
             axs[row, col].set_xlabel('Actual')
             axs[row, col].set_ylabel('Predicted')
@@ -163,12 +135,12 @@ class RFModel(BaseModel):
         elif n_rows == 1:
             axs = axs.reshape(1, -1)
 
-        residuals = y_test - y_hat
+        residuals = y_test.values - y_hat.values
 
         for idx, target in enumerate(self.target_names):
             row = idx // n_cols
             col = idx % n_cols
-            axs[row, col].scatter(y_hat[:, idx], residuals[:, idx])
+            axs[row, col].scatter(y_hat.values[:, idx], residuals[:, idx])  # Explicitly use `.values`
             axs[row, col].set_title(target)
             axs[row, col].set_xlabel('Predicted')
             axs[row, col].set_ylabel('Residual')

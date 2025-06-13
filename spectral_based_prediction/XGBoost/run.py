@@ -18,10 +18,8 @@ def main(train: bool = True, single_target: bool = True, target: str = target_va
         DATA_FOLDER_PATH, data_folder_spec=data_folder_spec, plsr_comp=f'{plsr_comp}')
 
     # Load the y_scaler saved from PLSR at the beginning
-    current_dir = os.getcwd()  # Get the current working directory
-    base_dir = os.path.dirname(os.path.dirname(current_dir))
-    y_scaler_path = os.path.join(base_dir, 'spectral_based_prediction', 'PLSR', 'models',
-                                data_folder_spec, 'y_scaler.pkl')
+    base_dir = os.path.dirname(os.getcwd())
+    y_scaler_path = os.path.join(base_dir, 'PLSR', 'models', data_folder_spec, 'y_scaler.pkl')
     y_scaler = joblib.load(y_scaler_path)
 
     # Configure models based on a single / multi-target setting
@@ -33,32 +31,36 @@ def main(train: bool = True, single_target: bool = True, target: str = target_va
         xgb_model = XGBoostGeneric(
             model_name='xgboost_single_target',
             is_multi_output=False,
-            target_variables=target
+            target_variables=target,
+            y_scaler=y_scaler
         )
         xgb_model_plsr = XGBoostGeneric(
             model_name='xgboost_single_target_plsr',
             is_multi_output=False,
-            target_variables=target
+            target_variables=target,
+            y_scaler=y_scaler
         )
     else:
         # Create multi-target models
         xgb_model = XGBoostGeneric(
             model_name='xgboost_multi_target',
             is_multi_output=True,
-            target_variables=TARGET_VARIABLES
+            target_variables=TARGET_VARIABLES,
+            y_scaler=y_scaler
         )
         xgb_model_plsr = XGBoostGeneric(
             model_name='xgboost_multi_target_plsr',
             is_multi_output=True,
-            target_variables=TARGET_VARIABLES
+            target_variables=TARGET_VARIABLES,
+            y_scaler=y_scaler
         )
-        xgb_model.y_scaler = y_scaler
-        xgb_model_plsr.y_scaler = y_scaler
+        # xgb_model.y_scaler = y_scaler
+        # xgb_model_plsr.y_scaler = y_scaler
 
     if train or args.train:
         # run both XGBoost models
         xgb_model.run(train_path, val_path, test_path, data_folder_spec)
-        xgb_model_plsr.run(train_plsr_path, val_plsr_path, test_plsr_path, data_folder_spec)
+        xgb_model_plsr.run(train_plsr_path, val_plsr_path, test_plsr_path, data_folder_spec, True)
     else:
         model_suffix = 'single_target' if args.single_target else 'multi_target'
         xgb_model = load_model(directory=f"models/xgboost_{model_suffix}")

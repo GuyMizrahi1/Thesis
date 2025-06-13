@@ -113,23 +113,22 @@ class BaseModel:
         print(f"Debug: y_true range: [{np.min(y_true)}, {np.max(y_true)}]")
         print(f"Debug: y_pred range: [{np.min(y_pred)}, {np.max(y_pred)}]")
 
-        # Convert pandas Series to numpy array if necessary
-        if isinstance(y_true, pd.Series):
-            y_true = y_true.to_numpy()
-        if isinstance(y_pred, pd.Series):
-            y_pred = y_pred.to_numpy()
-
         # Ensure both arrays are 2D
-        if len(y_true.shape) == 1:
+        if y_true.ndim == 1:
             y_true = y_true.reshape(-1, 1)
-        if len(y_pred.shape) == 1:
+        if y_pred.ndim == 1:
             y_pred = y_pred.reshape(-1, 1)
 
-        n = len(y_true)
-        p = 1  # number of predictors
+        # Directly use non-scaled y_true to avoid inverse transformations
+        non_scaled_y_true = self.dataset.Y_test_non_scaled.values
+        print(f"Debug: Non-Scaled y_true range: [{np.min(non_scaled_y_true)}, {np.max(non_scaled_y_true)}]")
 
-        rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-        r2 = r2_score(y_true, y_pred)
+        n = len(non_scaled_y_true)
+        p = X_test.shape[1]
+
+        # Calculate metrics: RMSE, R², Adjusted R²
+        rmse = np.sqrt(mean_squared_error(non_scaled_y_true, y_pred))
+        r2 = r2_score(non_scaled_y_true, y_pred)
         r2_adj = 1 - (1 - r2) * (n - 1) / (n - p - 1)
 
         print(f"Debug: RMSE: {rmse}")
@@ -144,18 +143,25 @@ class BaseModel:
 
     def calculate_rmsecv(self, X, y, cv=10):
         """Calculate Root Mean Square Error of Cross-Validation."""
+        # Ensure y is a NumPy array
+        y = y.to_numpy() if isinstance(y, pd.DataFrame) else y
+
         if self.is_multi_output:
             rmsecv = {}
             for i, target in enumerate(self.target_variable_name):
+                # Extract and convert the target column
+                target_y = y[:, i] if y.ndim > 1 else y
                 mse_scores = cross_val_score(
                     self.model,
                     X,
-                    y[:, i],
+                    target_y,
                     scoring='neg_mean_squared_error',
                     cv=cv
                 )
                 rmsecv[target] = np.sqrt(-mse_scores.mean())
         else:
+            # Ensure y is 1-D for scikit-learn
+            y = y.ravel() if y.ndim > 1 else y
             mse_scores = cross_val_score(
                 self.model,
                 X,
@@ -200,14 +206,26 @@ class BaseModel:
         return {'vip_scores': None}
 
     def evaluate(self):
-        y_pred = self.model.predict(self.dataset.X_test)
-        y_true = self.dataset.Y_test
+        y_pred_scaled = self.model.predict(self.dataset.X_test)  # Predicted, scaled values (1D or 2D)
 
+        # Use saved `y_true` directly if available
+        y_true = self.dataset.Y_test_non_scaled  # This is the actual saved unscaled `y_true`
+
+        # Ensure y_pred_scaled is reshaped to 2D if necessary
+        if y_pred_scaled.ndim == 1:
+            y_pred_scaled = y_pred_scaled.reshape(-1, 1)
+
+        # Inverse-transform predictions to original scale
+        if self.y_scaler is not None:
+            y_pred = self.dataset.Y_scaler.inverse_transform(y_pred_scaled)
+        # Calculate performance metrics
         metrics = self.calculate_metrics(y_true, y_pred, self.dataset.X_test)
+        # Compute Cross-Validated RMSE
         rmsecv = self.calculate_rmsecv(self.dataset.X_train, self.dataset.Y_train)
+        # Calculate Variable Importance (if applicable)
         vip = self.calculate_vip_scores(self.dataset.X_train)
 
-        # Store all metrics
+        # Store evaluation metrics
         self.evaluation_metrics = {
             'test_metrics': metrics,
             'rmsecv': rmsecv,
