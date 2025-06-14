@@ -7,7 +7,7 @@ from sklearn.model_selection import cross_val_score
 from sklearn.metrics import r2_score, mean_squared_error
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from spectral_based_prediction.constants_config import data_folder_spec
+from spectral_based_prediction.constants_config import data_folder_spec, target_variables
 
 
 class BaseModel:
@@ -68,11 +68,15 @@ class BaseModel:
         """
         Just a method to compute RMSE
         """
-
+        # todo vine
         if self.is_multi_output:
-            n_value_rmse, sc_value_rmse, st_value_rmse = np.sqrt(
-                mean_squared_error(y_true=Y, y_pred=Y_hat, multioutput='raw_values'))
-            return n_value_rmse, sc_value_rmse, st_value_rmse
+            sc_value_rmse, st_value_rmse = np.sqrt(mean_squared_error(y_true=Y, y_pred=Y_hat, multioutput='raw_values'))
+            return sc_value_rmse, st_value_rmse
+
+        # if self.is_multi_output:
+        #     n_value_rmse, sc_value_rmse, st_value_rmse = np.sqrt(
+        #         mean_squared_error(y_true=Y, y_pred=Y_hat, multioutput='raw_values'))
+        #     return n_value_rmse, sc_value_rmse, st_value_rmse
 
         return np.sqrt(mean_squared_error(y_true=Y, y_pred=Y_hat))
 
@@ -81,8 +85,11 @@ class BaseModel:
         y_hat = self.model.predict(x_val)
 
         if self.is_multi_output:
-            n_value_rmse, sc_value_rmse, st_value_rmse = self.computeRMSE(y_val, y_hat)
-            return n_value_rmse, sc_value_rmse, st_value_rmse
+            # todo vine
+            sc_value_rmse, st_value_rmse = self.computeRMSE(y_val, y_hat)
+            return sc_value_rmse, st_value_rmse
+            # n_value_rmse, sc_value_rmse, st_value_rmse = self.computeRMSE(y_val, y_hat)
+            # return n_value_rmse, sc_value_rmse, st_value_rmse
 
         return self.computeRMSE(y_val, y_hat)
 
@@ -148,7 +155,7 @@ class BaseModel:
 
         if self.is_multi_output:
             rmsecv = {}
-            for i, target in enumerate(self.target_variable_name):
+            for i, target in enumerate(target_variables):
                 # Extract and convert the target column
                 target_y = y[:, i] if y.ndim > 1 else y
                 mse_scores = cross_val_score(
@@ -220,17 +227,17 @@ class BaseModel:
             y_pred = self.dataset.Y_scaler.inverse_transform(y_pred_scaled)
         # Calculate performance metrics
         metrics = self.calculate_metrics(y_true, y_pred, self.dataset.X_test)
-        # Compute Cross-Validated RMSE
-        rmsecv = self.calculate_rmsecv(self.dataset.X_train, self.dataset.Y_train)
-        # Calculate Variable Importance (if applicable)
-        vip = self.calculate_vip_scores(self.dataset.X_train)
+        # # Compute Cross-Validated RMSE
+        # rmsecv = self.calculate_rmsecv(self.dataset.X_train, self.dataset.Y_train)
+        # # Calculate Variable Importance (if applicable)
+        # vip = self.calculate_vip_scores(self.dataset.X_train)
 
         # Store evaluation metrics
         self.evaluation_metrics = {
             'test_metrics': metrics,
-            'rmsecv': rmsecv,
+            # 'rmsecv': rmsecv,
             'best_n_components': getattr(self, "best_n_components", None),
-            'variable_importance': vip
+            # 'variable_importance': vip
         }
 
         return metrics

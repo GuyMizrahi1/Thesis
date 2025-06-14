@@ -5,13 +5,14 @@ import itertools
 import numpy as np
 import pandas as pd
 import xgboost as xgb
+from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 from sklearn.model_selection import KFold
 # from sklearn.exceptions import NotFittedError
 # from sklearn.preprocessing import StandardScaler
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.metrics import mean_squared_error, r2_score
-from spectral_based_prediction.constants_config import TARGET_VARIABLES, NON_FEATURE_COLUMNS, MEAN
+from spectral_based_prediction.constants_config import NON_FEATURE_COLUMNS, MEAN, target_variables # , TARGET_VARIABLES
 
 
 class XGBoostGeneric:
@@ -54,7 +55,7 @@ class XGBoostGeneric:
 
     def preprocess_data(self, dataset="train"):
         """Preprocess data differently for regular XGBoost and PLSR-based XGBoost"""
-        feature_columns = [col for col in self.train_data.columns if col not in NON_FEATURE_COLUMNS]
+        feature_columns = [col for col in self.train_data.columns if col not in target_variables]
 
         # Get the right dataset
         if dataset == "train":
@@ -175,6 +176,29 @@ class XGBoostGeneric:
             y = y.ravel()
         return y
 
+    def is_scaled_multi(self, y):
+        # Check if y is a numpy array or pandas Series or DataFrame
+        if not isinstance(y, np.ndarray):  # If y is NOT a numpy array
+            import pandas as pd  # Import pandas if it's not yet imported
+            if isinstance(y, (pd.Series, pd.DataFrame)):  # Check for pandas types
+                y_array = y.to_numpy()  # Convert pandas object to numpy array
+            else:
+                raise TypeError(
+                    f"Input type {type(y)} is not supported. Provide a numpy array, pandas Series, or DataFrame.")
+        else:
+            y_array = y  # If y is already a numpy array, keep it as is
+
+        # Check for invalid scaling
+        if np.sum(y_array < 0) <= 1:  # Example check - your condition
+            return False  # Not scaled
+        else:
+            return True
+
+    def inverse_scale_if_needed_for_multi(self, y):
+        if self.is_scaled_multi(y):
+            y = self.y_scaler.inverse_transform(y)
+        return y
+
     def scale_y_values(self, y, y_pred):
         if not self.model_name.endswith('_plsr'):
             # For regular XGBoost, we need to scale both predictions and true values
@@ -213,19 +237,23 @@ class XGBoostGeneric:
             model = MultiOutputRegressor(xgb.XGBRegressor(**model_params, eval_metric='rmse'))
         else:
             model = xgb.XGBRegressor(**model_params, eval_metric='rmse')
-
+        # todo vine
+        if "ID" in X_train.columns:
+            X_train = X_train.drop(columns=["ID"])
+        if "ID" in X_val.columns:
+            X_val = X_val.drop(columns=["ID"])
         model.fit(X_train, y_train)
         y_pred = model.predict(X_val)
 
-        # y_true_final, y_pred_final = self.scale_y_values(y_val, y_pred)
-        y_val = self.inverse_scale_if_needed(y_val)
-        y_pred = self.inverse_scale_if_needed(y_pred)
-
         if self.is_multi_output:
+            y_val = self.inverse_scale_if_needed_for_multi(y_val)
+            y_pred = self.inverse_scale_if_needed_for_multi(y_pred)
             multi_rmses = np.sqrt(mean_squared_error(y_val, y_pred, multioutput='raw_values'))
             mean_rmses = np.mean(multi_rmses)
             return mean_rmses, multi_rmses.tolist()
         else:
+            y_val = self.inverse_scale_if_needed(y_val)
+            y_pred = self.inverse_scale_if_needed(y_pred)
             rmse = np.sqrt(mean_squared_error(y_val, y_pred))
             return rmse, [rmse]
 
@@ -239,11 +267,10 @@ class XGBoostGeneric:
 
         # Initialize best_targets_rmses based on the model type
         if self.is_multi_output:
-            best_targets_rmses = {target: None for target in TARGET_VARIABLES}
+            best_targets_rmses = {target: None for target in target_variables}
         else:
             best_targets_rmses = {self.target_variables[0]: None}
 
-        # # todo return this code!!!!!-------------------------------------------------------------
         # Hyperparameter tuning loop
         for params in tqdm(param_grid, desc="Hyperparameter tuning"):
             rmse, multi_targets_rmses = self.train_and_evaluate_by_rmse_per_configuration(params, X_train, y_train,
@@ -253,16 +280,12 @@ class XGBoostGeneric:
                 minimal_rmse = rmse
                 best_params = params
                 if self.is_multi_output:
-                    best_targets_rmses = {target: multi_targets_rmses[i] for i, target in enumerate(TARGET_VARIABLES)}
+                    best_targets_rmses = {target: multi_targets_rmses[i] for i, target in enumerate(target_variables)}
                 else:
                     best_targets_rmses = {self.target_variables[0]: multi_targets_rmses[0]}
 
         self.best_params = best_params
-        # # todo return this code!!!!!-------------------------------------------------------------
-        # self.best_params = {'learning_rate': 0.2, 'max_depth': 7, 'n_estimators': 100, 'subsample': 0.8,
-        #                     'colsample_bytree': 0.8, 'gamma': 0, 'reg_lambda': 1}
-        # best_targets_rmses = {'N_Value': np.float64(0.24239717956065013)}
-        # minimal_rmse = np.float64(0.24239717956065013)
+
         best_targets_rmses[MEAN] = minimal_rmse
         self.targets_rmses_for_best_params = best_targets_rmses
         print(f"\nBest Configurations for {model_name} raised from Hyperparameter tuning:")
@@ -274,23 +297,7 @@ class XGBoostGeneric:
         kf = KFold(n_splits=self.n_splits, shuffle=True, random_state=42)
         self.train_rmses = {}
         self.val_rmses = {}
-        self.scalers = {}
-
         is_multi_output = len(self.target_variables) > 1
-        # todo - I don't see why does we nee ro do it if I have y_scaler from the PLSR package
-        # # Fit scaler per target
-        # for i, target in enumerate(self.target_variables):
-        #     scaler = StandardScaler()
-        #     if isinstance(y_train, np.ndarray):
-        #         y_col = y_train[:, i].reshape(-1, 1)
-        #     elif isinstance(y_train, pd.Series):
-        #         y_col = y_train.values.reshape(-1, 1)
-        #     else:
-        #         y_col = y_train[target].values.reshape(-1, 1)
-        #     scaler.fit(y_col)
-        #     self.scalers[target] = scaler
-
-        # self.y_scaler = self.scalers[self.target_variables[0]]  # default scaler
 
         params = self.best_params if hasattr(self, "best_params") else param_grid
 
@@ -307,12 +314,15 @@ class XGBoostGeneric:
 
             if is_multi_output:
                 model = MultiOutputRegressor(xgb.XGBRegressor(**params, eval_metric='rmse'))
+                if "ID" in X_train_fold.columns:
+                    X_train_fold = X_train_fold.drop(columns=["ID"])
                 model.fit(X_train_fold, y_train_fold)
 
                 for i, estimator in enumerate(model.estimators_):
                     target = self.target_variables[i]
-                    y_train_true = y_train_fold[:, i] if isinstance(y_train_fold, np.ndarray) else y_train_fold.iloc[:,
-                                                                                                   i]
+
+                    # Extract only the i-th column for the target variable
+                    y_train_true = y_train_fold[:, i] if isinstance(y_train_fold, np.ndarray) else y_train_fold.iloc[:, i]
                     y_val_true = y_val_fold[:, i] if isinstance(y_val_fold, np.ndarray) else y_val_fold.iloc[:, i]
 
                     per_iter_train_rmse = []
@@ -320,16 +330,15 @@ class XGBoostGeneric:
 
                     for round_num in range(1, estimator.best_iteration + 1 if hasattr(estimator,
                                                                                       "best_iteration") else estimator.n_estimators + 1):
+                        if "ID" in X_train_fold.columns:
+                            X_train_fold = X_train_fold.drop(columns=["ID"])
+                        if "ID" in X_val_fold.columns:
+                            X_val_fold = X_val_fold.drop(columns=["ID"])
                         y_train_pred_i = estimator.predict(X_train_fold, iteration_range=(0, round_num))
                         y_val_pred_i = estimator.predict(X_val_fold, iteration_range=(0, round_num))
 
-                        # y_train_scaled = self.scalers[target].transform(y_train_true.values.reshape(-1, 1))
-                        # y_train_pred_scaled = self.scalers[target].transform(y_train_pred_i.reshape(-1, 1))
-                        # y_val_scaled = self.scalers[target].transform(y_val_true.values.reshape(-1, 1))
-                        # y_val_pred_scaled = self.scalers[target].transform(y_val_pred_i.reshape(-1, 1))
-
-                        rmse_train = mean_squared_error(y_train_true, y_train_pred_i, squared=False)
-                        rmse_val = mean_squared_error(y_val_true, y_val_pred_i, squared=False)
+                        rmse_train = np.sqrt(mean_squared_error(y_train_true, y_train_pred_i))
+                        rmse_val = np.sqrt(mean_squared_error(y_val_true, y_val_pred_i))
 
                         per_iter_train_rmse.append(rmse_train)
                         per_iter_val_rmse.append(rmse_val)
@@ -342,25 +351,28 @@ class XGBoostGeneric:
                     final_val_rmse = per_iter_val_rmse[-1]
                     fold_train_final_rmse[target].append(final_train_rmse)
                     fold_val_final_rmse[target].append(final_val_rmse)
-
             else:
                 target = self.target_variables[0]
                 model = xgb.XGBRegressor(**params, eval_metric='rmse')
                 y_train_target = self.extract_target_values(y_train_fold, target)
                 y_val_target = self.extract_target_values(y_val_fold, target)
-
-                model.fit(
-                    X_train_fold,
-                    y_train_target,
-                    eval_set=[(X_train_fold, y_train_target), (X_val_fold, y_val_target)],
-                    verbose=False
-                )
+                # todo for vine
+                if "ID" in X_train_fold.columns:
+                    X_train_fold = X_train_fold.drop(columns=["ID"])
+                if "ID" in X_val_fold.columns:
+                    X_val_fold = X_val_fold.drop(columns=["ID"])
+                model.fit(X_train_fold, y_train_target,
+                          eval_set=[(X_train_fold, y_train_target), (X_val_fold, y_val_target)], verbose=False)
 
                 per_iter_train_rmse = []
                 per_iter_val_rmse = []
 
                 for round_num in range(1, model.best_iteration + 1 if hasattr(model,
                                                                               "best_iteration") else model.n_estimators + 1):
+                    if "ID" in X_train_fold.columns:
+                        X_train_fold = X_train_fold.drop(columns=["ID"])
+                    if "ID" in X_val_fold.columns:
+                        X_val_fold = X_val_fold.drop(columns=["ID"])
                     y_train_pred_i = model.predict(X_train_fold, iteration_range=(0, round_num))
                     y_val_pred_i = model.predict(X_val_fold, iteration_range=(0, round_num))
 
@@ -391,12 +403,140 @@ class XGBoostGeneric:
             self.final_train_rmse[target] = np.mean(fold_train_final_rmse[target])
             self.final_val_rmse[target] = np.mean(fold_val_final_rmse[target])
 
+    def k_fold_cross_validate_plsr_model(self, X_train, y_train, param_grid, y_scaler):
+        kf = KFold(n_splits=self.n_splits, shuffle=True, random_state=42)
+        self.train_rmses = {}
+        self.val_rmses = {}
+        is_multi_output = len(self.target_variables) > 1
+
+        params = self.best_params if hasattr(self, "best_params") else param_grid
+
+        fold_train_final_rmse = {target: [] for target in self.target_variables}
+        fold_val_final_rmse = {target: [] for target in self.target_variables}
+        per_fold_train_rmses = {target: [] for target in self.target_variables}
+        per_fold_val_rmses = {target: [] for target in self.target_variables}
+
+        for train_index, val_index in tqdm(kf.split(X_train), desc="Cross-validation"):
+            X_train_fold = X_train[train_index] if isinstance(X_train, np.ndarray) else X_train.iloc[train_index]
+            X_val_fold = X_train[val_index] if isinstance(X_train, np.ndarray) else X_train.iloc[val_index]
+            y_train_fold = y_train[train_index] if isinstance(y_train, np.ndarray) else y_train.iloc[train_index]
+            y_val_fold = y_train[val_index] if isinstance(y_train, np.ndarray) else y_train.iloc[val_index]
+
+            if is_multi_output:
+                model = MultiOutputRegressor(xgb.XGBRegressor(**params, eval_metric='rmse'))
+                if "ID" in X_train_fold.columns:
+                    X_train_fold = X_train_fold.drop(columns=["ID"])
+                model.fit(X_train_fold, y_train_fold)
+
+                for i, estimator in enumerate(model.estimators_):
+                    target = self.target_variables[i]
+
+                    y_train_true_raw = y_train_fold[:, i] if isinstance(y_train_fold,
+                                                                        np.ndarray) else y_train_fold.iloc[:, i].values
+                    y_val_true_raw = y_val_fold[:, i] if isinstance(y_val_fold, np.ndarray) else y_val_fold.iloc[:,
+                                                                                                 i].values
+
+                    # Only do inverse transform ONCE for the true values
+                    if hasattr(y_scaler, 'scale_') and hasattr(y_scaler, 'mean_'):
+                        scale = y_scaler.scale_[i]
+                        mean = y_scaler.mean_[i]
+                        y_train_true = (y_train_true_raw * scale) + mean
+                        y_val_true = (y_val_true_raw * scale) + mean
+                    else:
+                        y_train_true = y_train_true_raw
+                        y_val_true = y_val_true_raw
+
+                    per_iter_train_rmse = []
+                    per_iter_val_rmse = []
+
+                    for round_num in range(1, estimator.best_iteration + 1 if hasattr(estimator,
+                                                                                      "best_iteration") else estimator.n_estimators + 1):
+                        if "ID" in X_train_fold.columns:
+                            X_train_fold = X_train_fold.drop(columns=["ID"])
+                        if "ID" in X_val_fold.columns:
+                            X_val_fold = X_val_fold.drop(columns=["ID"])
+                        y_train_pred_i = estimator.predict(X_train_fold, iteration_range=(0, round_num))
+                        y_val_pred_i = estimator.predict(X_val_fold, iteration_range=(0, round_num))
+
+                        # Inverse transform predictions ONLY (true values were handled above)
+                        if hasattr(y_scaler, 'scale_') and hasattr(y_scaler, 'mean_'):
+                            y_train_pred_i = (y_train_pred_i * scale) + mean
+                            y_val_pred_i = (y_val_pred_i * scale) + mean
+
+                        rmse_train = np.sqrt(mean_squared_error(y_train_true, y_train_pred_i))
+                        rmse_val = np.sqrt(mean_squared_error(y_val_true, y_val_pred_i))
+
+                        per_iter_train_rmse.append(rmse_train)
+                        per_iter_val_rmse.append(rmse_val)
+
+                    per_fold_train_rmses[target].append(per_iter_train_rmse)
+                    per_fold_val_rmses[target].append(per_iter_val_rmse)
+
+                    final_train_rmse = per_iter_train_rmse[-1]
+                    final_val_rmse = per_iter_val_rmse[-1]
+                    fold_train_final_rmse[target].append(final_train_rmse)
+                    fold_val_final_rmse[target].append(final_val_rmse)
+            else:
+                target = self.target_variables[0]
+                model = xgb.XGBRegressor(**params, eval_metric='rmse')
+                y_train_target = self.extract_target_values(y_train_fold, target)
+                y_val_target = self.extract_target_values(y_val_fold, target)
+                if "ID" in X_train_fold.columns:
+                    X_train_fold = X_train_fold.drop(columns=["ID"])
+                if "ID" in X_val_fold.columns:
+                    X_val_fold = X_val_fold.drop(columns=["ID"])
+                model.fit(X_train_fold,y_train_target,
+                    eval_set=[(X_train_fold, y_train_target), (X_val_fold, y_val_target)],verbose=False)
+
+                per_iter_train_rmse = []
+                per_iter_val_rmse = []
+
+                for round_num in range(1, model.best_iteration + 1 if hasattr(model,
+                                                                              "best_iteration") else model.n_estimators + 1):
+                    if "ID" in X_train_fold.columns:
+                        X_train_fold = X_train_fold.drop(columns=["ID"])
+                    if "ID" in X_val_fold.columns:
+                        X_val_fold = X_val_fold.drop(columns=["ID"])
+                    y_train_pred_i = model.predict(X_train_fold, iteration_range=(0, round_num))
+                    y_val_pred_i = model.predict(X_val_fold, iteration_range=(0, round_num))
+
+                    rmse_train = np.sqrt(mean_squared_error(y_train_fold, y_train_pred_i))
+                    rmse_val = np.sqrt(mean_squared_error(y_val_fold, y_val_pred_i))
+
+                    per_iter_train_rmse.append(rmse_train)
+                    per_iter_val_rmse.append(rmse_val)
+
+                per_fold_train_rmses[target].append(per_iter_train_rmse)
+                per_fold_val_rmses[target].append(per_iter_val_rmse)
+
+                # Final RMSE
+                final_train_rmse = per_iter_train_rmse[-1]
+                final_val_rmse = per_iter_val_rmse[-1]
+                fold_train_final_rmse[target].append(final_train_rmse)
+                fold_val_final_rmse[target].append(final_val_rmse)
+
+            self.model = model  # Save last model
+
+        # Aggregate per-iteration RMSEs
+        for target in self.target_variables:
+            self.train_rmses[target] = np.mean(per_fold_train_rmses[target], axis=0)
+            self.val_rmses[target] = np.mean(per_fold_val_rmses[target], axis=0)
+            self.final_train_rmse[target] = np.mean(fold_train_final_rmse[target])
+            self.final_val_rmse[target] = np.mean(fold_val_final_rmse[target])
+
+
     def evaluate_model(self, X, y, model, dataset_type='validation'):
         # Get predictions
+        if "ID" in X.columns:
+            X = X.drop(columns=["ID"])
         y_pred = model.predict(X)
 
-        y = self.inverse_scale_if_needed(y)
-        y_pred = self.inverse_scale_if_needed(y_pred)
+        if self.is_multi_output:
+            y = self.inverse_scale_if_needed_for_multi(y)
+            y_pred = self.inverse_scale_if_needed_for_multi(y_pred)
+        else:
+            y = self.inverse_scale_if_needed(y)
+            y_pred = self.inverse_scale_if_needed(y_pred)
         # y_true_final, y_pred_final = self.scale_y_values(y, y_pred)
 
         # Calculate metrics
@@ -434,48 +574,12 @@ class XGBoostGeneric:
         joblib.dump(self, os.path.join(directory, 'model.pkl'))
 
     def run(self, train_path, val_path, test_path, data_folder_spec, scaled=False):
-        print(f"Running {self.model_name} XGBoost{'MultiOutput' if self.is_multi_output else ''}")
+        print(f"Running {self.model_name} XGBoost{' MultiOutput' if self.is_multi_output else ''}")
 
         self.load_data(train_path, val_path, test_path)
         X_train, y_train = self.preprocess_data(dataset="train")
         X_val, y_val = self.preprocess_data(dataset="val")
         X_test, y_test = self.preprocess_data(dataset="test")
-
-        # todo - set as irrelevant today - I'll inverse at the end
-        # if self.model_name.endswith('_plsr'):
-        #     self.y_scaler.fit(y_train)
-        #     y_val = self.y_scaler.inverse_transform(y_val)
-        #     y_test = self.y_scaler.inverse_transform(y_test)
-
-        #     # Transform validation and test data using the fitted scaler
-        #     if not self.is_multi_output:
-        #         y_val = self.y_scaler.transform(
-        #             y_val.values.reshape(-1, 1) if isinstance(y_val, pd.Series) else y_val.reshape(-1, 1))
-        #         y_test = self.y_scaler.transform(
-        #             y_test.values.reshape(-1, 1) if isinstance(y_test, pd.Series) else y_test.reshape(-1, 1))
-        #     else:
-        #         y_val = self.y_scaler.transform(y_val)
-        #         y_test = self.y_scaler.transform(y_test)
-        # # Fit the y_scaler on training data if not already fitted
-        # if not self.model_name.endswith('_plsr'):
-        #     if not self.is_multi_output:
-        #         y_train_reshaped = y_train.values.reshape(-1, 1) if isinstance(y_train, pd.Series) else y_train.reshape(
-        #             -1, 1)
-        #     else:
-        #         y_train_reshaped = y_train
-        #     # Fit and transform the training data
-        #     self.y_scaler.fit(y_train_reshaped)
-        #     y_train = self.y_scaler.transform(y_train_reshaped)
-        #
-        #     # Transform validation and test data using the fitted scaler
-        #     if not self.is_multi_output:
-        #         y_val = self.y_scaler.transform(
-        #             y_val.values.reshape(-1, 1) if isinstance(y_val, pd.Series) else y_val.reshape(-1, 1))
-        #         y_test = self.y_scaler.transform(
-        #             y_test.values.reshape(-1, 1) if isinstance(y_test, pd.Series) else y_test.reshape(-1, 1))
-        #     else:
-        #         y_val = self.y_scaler.transform(y_val)
-        #         y_test = self.y_scaler.transform(y_test)
 
         print("Finding best configurations...")
         best_rmses, best_params, best_multi_rmses = self.find_best_configuration_based_rmse_score(
@@ -484,7 +588,10 @@ class XGBoostGeneric:
         for key, value in best_rmses.items():
             print(f"{key}: {value}")
 
-        self.k_fold_cross_validate_model(X_train, y_train, best_params, self.y_scaler)
+        if scaled:
+            self.k_fold_cross_validate_plsr_model(X_train, y_train, best_params, self.y_scaler)
+        else:
+            self.k_fold_cross_validate_model(X_train, y_train, best_params, self.y_scaler)
         self.evaluate_model(X_val, y_val, self.model, dataset_type='validation')
         self.save_model_object(data_folder_spec)
         self.evaluate_model(X_test, y_test, self.model, dataset_type='test')

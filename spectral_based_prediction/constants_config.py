@@ -26,17 +26,21 @@ class Crop(str, Enum):
 class CropPart(str, Enum):
     leaf = 'lea'
 
+TARGET_VARIABLES = [ColumnName.n_value.value, ColumnName.sc_value.value, ColumnName.st_value.value]
+
 # Align for model training
 current_crop = Crop.vine.value
-target_variables = [ColumnName.st_value.value]
-data_folder_spec = f'{current_crop}_{target_variables[0]}'
-n_components = 15
-
-
-TARGET_VARIABLES = [ColumnName.n_value.value, ColumnName.sc_value.value, ColumnName.st_value.value]
-NON_FEATURE_COLUMNS = [ColumnName.id.value] + TARGET_VARIABLES
+# target_variables = [ColumnName.n_value.value]
+target_variables = [ColumnName.sc_value.value, ColumnName.st_value.value]
+# data_folder_spec = f'{current_crop}_{target_variables[0]}'
+data_folder_spec = f'{current_crop}_multiple_explained_variables'
+n_components = 16
+# todo vine
+# NON_FEATURE_COLUMNS = [ColumnName.id.value] + TARGET_VARIABLES
+NON_FEATURE_COLUMNS = [ColumnName.id.value] + target_variables
 MEAN = 'Mean'
 AVG_RMSE = 'Avg_RMSE'
+ALL_METRIC_KEYS = TARGET_VARIABLES + [AVG_RMSE]
 TARGET_VARIABLES_WITH_MEAN = TARGET_VARIABLES + [MEAN]
 MULTI = 'Multi'
 PLSR_BASED_MODEL = 'PLSR_based_model'

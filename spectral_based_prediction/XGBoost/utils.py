@@ -96,7 +96,8 @@ def get_X_y(data_path, dataset='train'):
     X = data[feature_columns]
 
     # Find the target column - it should be the only non-feature column
-    target_columns = [col for col in NON_FEATURE_COLUMNS if col in data.columns and col != ColumnName.id.value]  # Exclude ID column explicitly
+    target_columns = [col for col in NON_FEATURE_COLUMNS if
+                      col in data.columns and col != ColumnName.id.value]  # Exclude ID column explicitly
 
     # Convert target columns to numeric type
     y = data[target_columns].apply(pd.to_numeric, errors='coerce')
@@ -116,10 +117,16 @@ def save_test_scores(model1, model2, single_target, test_path1, test_path2, save
         model2.model_name: {}
     }
 
-    y_test1 = model1.inverse_scale_if_needed(y_test1)
-    y_pred1 = model1.inverse_scale_if_needed(y_pred1)
-    y_test2 = model2.inverse_scale_if_needed(y_test2)
-    y_pred2 = model2.inverse_scale_if_needed(y_pred2)
+    if single_target:
+        y_test1 = model1.inverse_scale_if_needed(y_test1)
+        y_pred1 = model1.inverse_scale_if_needed(y_pred1)
+        y_test2 = model2.inverse_scale_if_needed(y_test2)
+        y_pred2 = model2.inverse_scale_if_needed(y_pred2)
+    else:
+        y_test1 = model1.inverse_scale_if_needed_for_multi(y_test1)
+        y_pred1 = model1.inverse_scale_if_needed_for_multi(y_pred1)
+        y_test2 = model2.inverse_scale_if_needed_for_multi(y_test2)
+        y_pred2 = model2.inverse_scale_if_needed_for_multi(y_pred2)
     # Ensure y_pred1 and y_pred2 are 2D arrays
     if len(y_pred1.shape) == 1:
         y_pred1 = y_pred1.reshape(-1, 1)
@@ -230,6 +237,7 @@ def save_test_scores(model1, model2, single_target, test_path1, test_path2, save
     # # Save scores to a file
     # with open(os.path.join(save_dir, 'test_scores.json'), 'w') as f:
     #     json.dump(scores, f, indent=4)
+
 
 # def plot_learning_curve(ax, model, config_name):
 #     n_estimators = model.best_params['n_estimators']
@@ -352,22 +360,24 @@ def plot_feature_importances(model1, model2, save_dir):
     plt.show()
 
 
-def plot_residuals(model1, model2, target, directory1, directory2, save_dir):
+def plot_residuals(model1, model2, single_target, target, directory1, directory2, save_dir):
     print("Loading and checking data...")
     X_test1, y_test1 = get_X_y(directory1, dataset='test')
     X_test2, y_test2 = get_X_y(directory2, dataset='test')
 
     y_pred1 = model1.model.predict(X_test1)
     y_pred2 = model2.model.predict(X_test2)
-    # todo make sure it's not scaled again!!!!! I should remove it tonight!
 
-    y_test1 = model1.inverse_scale_if_needed(y_test1)
-    y_pred1 = model1.inverse_scale_if_needed(y_pred1)
-    y_test2 = model2.inverse_scale_if_needed(y_test2)
-    y_pred2 = model2.inverse_scale_if_needed(y_pred2)
-
-    # y_test1_scaled, y_pred1_scaled = model1.scale_y_values(y_test1, y_pred1)
-    # y_test2_scaled, y_pred2_scaled = model2.scale_y_values(y_test2, y_pred2)
+    if single_target:
+        y_test1 = model1.inverse_scale_if_needed(y_test1)
+        y_pred1 = model1.inverse_scale_if_needed(y_pred1)
+        y_test2 = model2.inverse_scale_if_needed(y_test2)
+        y_pred2 = model2.inverse_scale_if_needed(y_pred2)
+    else:
+        y_test1 = model1.inverse_scale_if_needed_for_multi(y_test1)
+        y_pred1 = model1.inverse_scale_if_needed_for_multi(y_pred1)
+        y_test2 = model2.inverse_scale_if_needed_for_multi(y_test2)
+        y_pred2 = model2.inverse_scale_if_needed_for_multi(y_pred2)
 
     # Convert DataFrames to NumPy arrays, if needed
     y_test1 = y_test1.to_numpy() if isinstance(y_test1, pd.DataFrame) else y_test1
@@ -418,64 +428,3 @@ def plot_residuals(model1, model2, target, directory1, directory2, save_dir):
     os.makedirs(save_dir, exist_ok=True)
     plt.savefig(os.path.join(save_dir, f"residuals_plot_{target}.png"))
     plt.show()
-
-
-# def plot_residuals(model1, model2, target, directory1, directory2, save_dir):
-#     print("Loading and checking data...")
-#     X_test1, y_test1 = get_X_y(directory1, dataset='test')
-#     X_test2, y_test2 = get_X_y(directory2, dataset='test')
-#
-#     # print(f"Data shapes - X_test1: {X_test1.shape}, y_test1: {y_test1.shape}")
-#     # print(f"First few rows of y_test1:\n{y_test1.head()}")
-#
-#     # Get predictions
-#     y_pred1 = model1.model.predict(X_test1)
-#     y_pred2 = model2.model.predict(X_test2)
-#
-#     print(f"Predictions shapes - y_pred1: {y_pred1.shape}")
-#     print(f"First few predictions:\n{y_pred1[:5]}")
-#
-#     # Extract only the target column and convert to numeric
-#     y_test1_values = y_test1[target].values.astype(float)
-#     y_test2_values = y_test2[target].values.astype(float)
-#
-#     # Scale y_test1_values using model1's y_scaler
-#     y_test1_values_reshaped = y_test1_values.reshape(-1, 1)
-#     y_test1_values_scaled = model1.y_scaler.transform(y_test1_values_reshaped).ravel()
-#
-#     # Ensure predictions are in the right shape
-#     y_pred1 = y_pred1.flatten()  # Make sure it's 1D
-#     y_pred2 = y_pred2.flatten()  # Make sure it's 1D
-#
-#     # Calculate residuals
-#     residuals1 = y_test1_values_scaled - y_pred1
-#     residuals2 = y_test2_values - y_pred2
-#
-#     print(f"Residuals range - Model 1: [{np.nanmin(residuals1)}, {np.nanmax(residuals1)}]")
-#     print(f"Number of non-zero residuals: {np.count_nonzero(~np.isnan(residuals1))}")
-#
-#     # Create the plot
-#     plt.figure(figsize=(8, 6))
-#
-#     # Filter out NaN values for plotting
-#     mask1 = ~np.isnan(residuals1)
-#     mask2 = ~np.isnan(residuals2)
-#
-#     plt.scatter(y_pred1[mask1], residuals1[mask1], alpha=0.5,
-#                 label=f'{model1.model_name} Residuals',
-#                 color=COLOR_PALETTE_FOR_TWO_MODELS['model1'])
-#     plt.scatter(y_pred2[mask2], residuals2[mask2], alpha=0.5,
-#                 label=f'{model2.model_name} Residuals',
-#                 color=COLOR_PALETTE_FOR_TWO_MODELS['model2'])
-#
-#     plt.xlabel("Predicted Values")
-#     plt.ylabel("Residuals Values")
-#     plt.title(f"Residuals Plot for {target}")
-#     plt.axhline(y=0, color="r", linestyle="--")
-#     plt.legend()
-#     plt.tight_layout()
-#
-#     # Save the plot
-#     os.makedirs(save_dir, exist_ok=True)
-#     plt.savefig(os.path.join(save_dir, f"residuals_plot_{target}.png"))
-#     plt.show()

@@ -49,10 +49,11 @@ def tuningLoop(model_obj, params, PLSR_Tuning):
             rmse = model_obj.validate()
 
             if model_obj.is_multi_output:
-                n_value_rmse, sc_value_rmse, st_value_rmse = rmse
+                sc_value_rmse, st_value_rmse = rmse # todo vine
+                # n_value_rmse, sc_value_rmse, st_value_rmse = rmse
                 avg_rmse = np.mean(rmse)
                 # Mainly For plotting
-                rmse_results[n_value] += [n_value_rmse]
+                # rmse_results[n_value] += [n_value_rmse]  todo vine
                 rmse_results[sc_value] += [sc_value_rmse]
                 rmse_results[st_value] += [st_value_rmse]
                 # For choosing the best hyperparameters
@@ -73,10 +74,13 @@ def tuningLoop(model_obj, params, PLSR_Tuning):
             rmse = model_obj.validate()
 
             if model_obj.is_multi_output:
-                n_value_rmse, sc_value_rmse, st_value_rmse = rmse
+                # todo vine
+                # n_value_rmse, sc_value_rmse, st_value_rmse = rmse
+                sc_value_rmse, st_value_rmse = rmse
                 avg_rmse = np.mean(rmse)
                 # Mainly For plotting
-                rmse_results[n_value] += [n_value_rmse]
+                # todo vine
+                # rmse_results[n_value] += [n_value_rmse]
                 rmse_results[sc_value] += [sc_value_rmse]
                 rmse_results[st_value] += [st_value_rmse]
                 # For choosing the best hyperparameters
@@ -129,8 +133,10 @@ def CV10(model_obj, n_splits=10):
         rmses = model_obj.CrossValidate(X_train_fold, y_train_fold, X_val_fold, y_val_fold)
 
         if model_obj.is_multi_output:
-            n_rmse, sc_rmse, st_rmse = rmses
-            rmse_results[n_value] += [n_rmse]
+            # todo vine
+            # n_rmse, sc_rmse, st_rmse = rmses
+            # rmse_results[n_value] += [n_rmse]
+            sc_rmse, st_rmse = rmses
             rmse_results[sc_value] += [sc_rmse]
             rmse_results[st_value] += [st_rmse]
             rmse_results['Avg_RMSE'] += [np.mean(rmses)]

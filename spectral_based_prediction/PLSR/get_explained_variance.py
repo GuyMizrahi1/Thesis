@@ -71,6 +71,7 @@ if __name__ == '__main__':
 
     # Plot elbow curves for each target variable
     plt.figure(figsize=(10, 6))
+    max_elbow_point=0
     for i in range(dataset.Y_train.shape[1]):
         variance_curve = explained_variance_per_target[:, i]
         plt.plot(range(1, max_components + 1), variance_curve, label=f'{target_variables[i]}')
@@ -81,6 +82,11 @@ if __name__ == '__main__':
         plt.axvline(x=elbow_point, color='r', linestyle='--', alpha=0.3)
 
         print(f"Optimal number of components for {target_variables[i]}: {elbow_point}")
+        if len(target_variables) > 1:
+            if max_elbow_point < elbow_point:
+                max_elbow_point = elbow_point
+    print(f"\nNumber of components for Multioutput Model (Maximal Elbow Point): {max_elbow_point}")
+
 
     plt.xlabel('Number of PLS Components')
     plt.ylabel('Explained Variance (R²)')

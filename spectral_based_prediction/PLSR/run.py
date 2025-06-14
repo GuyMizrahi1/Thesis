@@ -18,14 +18,15 @@ def figures_for_multi_output_plsr():
     # Correlation matrix - dependent variables
     plt.figure(figsize=(8, 5))
     sns.heatmap(pd.concat([dataset.Y_train, dataset.Y_val, dataset.Y_test], axis=0).corr(), annot=True, fmt=".2f",
-                cmap='Reds')
+                cmap='Greens')
     plt.title('Correlation matrix for X and Y')
-    plt.savefig('./Plots/Correlation_matrix.png')
+    os.makedirs(f'outputs/{data_folder_spec}', exist_ok=True)
+    plt.savefig(f'outputs/{data_folder_spec}/Correlation_matrix.png')
 
     # Pair plot - dependent variables
     plt.figure(figsize=(8, 5))
     sns.pairplot(pd.concat([dataset.Y_train, dataset.Y_val, dataset.Y_test], axis=0))
-    plt.savefig('./Plots/Pair_plot.png')
+    plt.savefig(f'outputs/{data_folder_spec}/Pair_plot.png')
 
 
 if __name__ == '__main__':
@@ -70,13 +71,13 @@ if __name__ == '__main__':
         models['multi'] = multi_PLSR
         multi_rmses = hyperParameterTuning(multi_PLSR, PLSR_Tuning=True)
         rmses['multi'] = multi_rmses
-
-    # Create individual models for each target
-    for target in dataset.target_variables:
-        model = PLSRModel(dataset, param_grid, is_multi_output=False, target_variable_name=target)
-        models[target] = model
-        target_rmses = hyperParameterTuning(model, PLSR_Tuning=True)
-        rmses[target] = target_rmses
+    else:
+        # Create individual models for each target
+        for target in dataset.target_variables:
+            model = PLSRModel(dataset, param_grid, is_multi_output=False, target_variable_name=target)
+            models[target] = model
+            target_rmses = hyperParameterTuning(model, PLSR_Tuning=True)
+            rmses[target] = target_rmses
 
     path = f'./outputs/{data_folder_spec}'
     joblib.dump(Y_scaler, os.path.join('./models', data_folder_spec, 'y_scaler.pkl'))
@@ -126,9 +127,9 @@ if __name__ == '__main__':
         # Evaluate final model performance on testset, and collect RMSECV and VIP
         test_metrics = model.evaluate()
         print("Test Metrics (RMSE, R²):", test_metrics)
-        print("RMSECV:", model.evaluation_metrics["rmsecv"])
+        # print("RMSECV:", model.evaluation_metrics["rmsecv"])
         print('best_n_components', getattr(model, "best_n_components", None))
-        print("VIP Scores:", model.evaluation_metrics["variable_importance"])
+        # print("VIP Scores:", model.evaluation_metrics["variable_importance"])
 
         create_json_file(model.evaluation_metrics, path ,f'{model_name}_rmse_test.json')
 

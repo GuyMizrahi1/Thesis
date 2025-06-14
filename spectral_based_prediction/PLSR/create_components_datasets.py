@@ -25,9 +25,6 @@ if __name__ == '__main__':
     X_scaler = StandardScaler()
     y_scaler = StandardScaler()
 
-    # joblib.dump(X_scaler, os.path.join('./models', data_folder_spec, 'X_scaler.pkl'))
-    # joblib.dump(y_scaler, os.path.join('./models', data_folder_spec, 'y_scaler.pkl'))
-
     dataset.X_train[dataset.X_train.columns] = X_scaler.fit_transform(dataset.X_train.values)
     dataset.X_val[dataset.X_val.columns] = X_scaler.transform(dataset.X_val.values)
     dataset.X_test[dataset.X_test.columns] = X_scaler.transform(dataset.X_test.values)

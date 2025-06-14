@@ -20,7 +20,7 @@ class Dataset:
 
         # Load scaled and non-scaled data for train, validation, and test splits
         self.ID_train, self.X_train, self.Y_train, self.Y_train_non_scaled = self.load_and_merge(
-            scaled_file_name=train_file_name, non_scaled_file_name="test_data.parquet"
+            scaled_file_name=train_file_name, non_scaled_file_name="train_data.parquet"
         )
         self.ID_val, self.X_val, self.Y_val, self.Y_val_non_scaled = self.load_and_merge(
             scaled_file_name=validation_file_name, non_scaled_file_name="validation_data.parquet"
@@ -67,15 +67,31 @@ class Dataset:
         )
 
         id_col = merged_data[[ColumnName.id.value]]
-        Y_scaled = merged_data[[f'{self.target_variables[0]}_x']].rename(
-            columns={f'{self.target_variables[0]}_x': self.target_variables[0]}
-        ).reset_index(drop=True)
-        Y_non_scaled = merged_data[[f'{self.target_variables[0]}_y']].rename(
-            columns={f'{self.target_variables[0]}_y': f'{self.target_variables[0]}_non_scaled'}
-        ).reset_index(drop=True)
 
-        # Extract relevant feature columns by removing ID and target columns
-        excluded_columns = {ColumnName.id.value, f'{self.target_variables[0]}_x', f'{self.target_variables[0]}_y'}
+        if len(self.target_variables) == 1:
+            Y_scaled = merged_data[[f'{self.target_variables[0]}_x']].rename(
+                columns={f'{self.target_variables[0]}_x': self.target_variables[0]}
+            ).reset_index(drop=True)
+            Y_non_scaled = merged_data[[f'{self.target_variables[0]}_y']].rename(
+                columns={f'{self.target_variables[0]}_y': f'{self.target_variables[0]}_non_scaled'}
+            ).reset_index(drop=True)
+
+            # Extract relevant feature columns by removing ID and target columns
+            excluded_columns = {ColumnName.id.value, f'{self.target_variables[0]}_x', f'{self.target_variables[0]}_y'}
+        else:
+            Y_scaled = merged_data[
+                [f'{var}_x' for var in self.target_variables]
+            ].rename(columns={f'{var}_x': var for var in self.target_variables}).reset_index(drop=True)
+
+            Y_non_scaled = merged_data[
+                [f'{var}_y' for var in self.target_variables]
+            ].rename(columns={f'{var}_y': f'{var}_non_scaled' for var in self.target_variables}).reset_index(drop=True)
+
+            # Extract relevant feature columns by removing ID and all target-related columns
+            excluded_columns = {ColumnName.id.value}.union(
+                {f'{var}_x' for var in self.target_variables}, {f'{var}_y' for var in self.target_variables}
+            )
+
         relevant_feature_columns = [col for col in merged_data.columns if col not in excluded_columns]
         X = merged_data[relevant_feature_columns].reset_index(drop=True)
 

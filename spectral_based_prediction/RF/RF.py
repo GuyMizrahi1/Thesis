@@ -9,8 +9,8 @@ from baseline_for_training.Dataset import Dataset
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.multioutput import MultiOutputRegressor
 from baseline_for_training.baseModels import BaseModel
+from spectral_based_prediction.constants_config import AVG_RMSE
 from baseline_for_training.Training_and_Tuning import hyperParameterTuning, CV10
-# from spectral_based_prediction.constants_config import TARGET_VARIABLES, COLOR_PALETTE_FOR_PLSR, AVG_RMSE
 
 
 class RFModel(BaseModel):
@@ -41,7 +41,7 @@ class RFModel(BaseModel):
 
         if self.is_multi_output:
             # For multiple targets, use the first target's results
-            metric_key = self.target_names[0]
+            metric_key = AVG_RMSE
             self.best_params = min(tuning_results[metric_key], key=lambda x: x[1])[0]
             self.model.estimator.set_params(**self.best_params)
         else:

@@ -45,17 +45,15 @@ def main(train: bool = True, single_target: bool = True, target: str = target_va
         xgb_model = XGBoostGeneric(
             model_name='xgboost_multi_target',
             is_multi_output=True,
-            target_variables=TARGET_VARIABLES,
+            target_variables=target_variables,
             y_scaler=y_scaler
         )
         xgb_model_plsr = XGBoostGeneric(
             model_name='xgboost_multi_target_plsr',
             is_multi_output=True,
-            target_variables=TARGET_VARIABLES,
+            target_variables=target_variables,
             y_scaler=y_scaler
         )
-        # xgb_model.y_scaler = y_scaler
-        # xgb_model_plsr.y_scaler = y_scaler
 
     if train or args.train:
         # run both XGBoost models
@@ -71,11 +69,14 @@ def main(train: bool = True, single_target: bool = True, target: str = target_va
     plot_chosen_configurations_rmse(xgb_model, xgb_model_plsr, single_target, figures_path)
     plot_learning_curves(xgb_model, xgb_model_plsr, figures_path)
     plot_feature_importances(xgb_model, xgb_model_plsr, figures_path)
-    plot_residuals(xgb_model, xgb_model_plsr, target, test_path, test_plsr_path, figures_path)
-
+    if single_target:
+        plot_residuals(xgb_model, xgb_model_plsr, single_target, target, test_path, test_plsr_path, figures_path)
+    else:
+        for target in target_variables:
+            plot_residuals(xgb_model, xgb_model_plsr, single_target, target, test_path, test_plsr_path, figures_path)
     # Save test scores
     save_test_scores(xgb_model, xgb_model_plsr, single_target, test_path, test_plsr_path, figures_path)
 
 
 if __name__ == "__main__":
-    main(single_target=True, target=target_variables[0])
+    main(single_target=False, target=target_variables)
