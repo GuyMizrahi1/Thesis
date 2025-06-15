@@ -10,7 +10,7 @@ def analyze_crops(df: pd.DataFrame, include_negatives: bool = True):
 
     # Prepare a list to hold a row-wise summary
     summary_data = []
-
+    crop_full_name = {'alm': 'Almond', 'avo': 'Avocado', 'cit': 'Citrus', 'vin': 'Vine'}
     for crop in unique_crops:
         crop_df = df[df[ColumnName.crop.value] == crop]
 
@@ -32,7 +32,7 @@ def analyze_crops(df: pd.DataFrame, include_negatives: bool = True):
         else:
             negative_n = negative_sc = negative_st = 0
         summary_data.append({
-            'Crop': crop,
+            'Crop': crop_full_name[crop],
             'N_Value Count': n_val,
             'SC_Value Count': sc_val,
             'ST_Value Count': st_val,
@@ -51,7 +51,7 @@ def analyze_crops(df: pd.DataFrame, include_negatives: bool = True):
 def main():
     print("Analysis for all relevant crops:")
     # df = pd.read_csv('data_files/extended_df_with_predicted_columns.csv')
-    df = pd.read_csv('data_files/extended_df.csv')
+    df = pd.read_csv('data_files/all_crops_merged.csv')
     analyze_crops(df, include_negatives=True)
     print("\nAnalysis is done for all crops.")
     print('Remove rows without all three values...')
